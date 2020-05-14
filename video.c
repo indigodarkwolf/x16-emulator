@@ -628,6 +628,8 @@ render_layer_line(uint8_t layer, uint16_t y)
 static uint8_t calculate_line_col_index(uint8_t spr_zindex, uint8_t spr_col_index, uint8_t l1_col_index, uint8_t l2_col_index)
 {
 	uint8_t col_index = 0;
+
+#if defined(__GNUC__)
 	switch (spr_zindex) {
 		case 3:
 			col_index = spr_col_index ?: l2_col_index ?: l1_col_index;
@@ -642,6 +644,22 @@ static uint8_t calculate_line_col_index(uint8_t spr_zindex, uint8_t spr_col_inde
 			col_index = l2_col_index ?: l1_col_index;
 			break;
 	}
+#else
+	switch (spr_zindex) {
+		case 3:
+			col_index = spr_col_index ? spr_col_index : (l2_col_index ? l2_col_index : l1_col_index);
+			break;
+		case 2:
+			col_index = l2_col_index ? l2_col_index : (spr_col_index ? spr_col_index : l1_col_index);
+			break;
+		case 1:
+			col_index = l2_col_index ? l2_col_index : (l1_col_index ? l1_col_index : spr_col_index);
+			break;
+		case 0:
+			col_index = l2_col_index ? l2_col_index : l1_col_index;
+			break;
+	}
+#endif
 	return col_index;
 }
 
@@ -717,6 +735,7 @@ render_line(uint16_t y)
 			}
 
 			if (same_sprite) {
+#if defined(__GNUC__)
 				switch (spr_zindex[0]) {
 					case 3:
 						for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
@@ -739,6 +758,30 @@ render_line(uint16_t y)
 						}
 						break;
 				}
+#else
+				switch (spr_zindex[0]) {
+					case 3:
+						for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
+							col_index[i] = spr_col_index[i] ? spr_col_index[i] : (l2_col_index[i] ? l2_col_index[i] : l1_col_index[i]);
+						}
+						break;
+					case 2:
+						for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
+							col_index[i] = l2_col_index[i] ? l2_col_index[i] : (spr_col_index[i] ? spr_col_index[i] : l1_col_index[i]);
+						}
+						break;
+					case 1:
+						for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
+							col_index[i] = l2_col_index[i] ? l2_col_index[i] : (l1_col_index[i] ? l1_col_index[i] : spr_col_index[i]);
+						}
+						break;
+					case 0:
+						for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
+							col_index[i] = l2_col_index[i] ? l2_col_index[i] : l1_col_index[i];
+						}
+						break;
+				}
+#endif
 			} else {
 				for (int i = 0; i < LAYER_PIXELS_PER_ITERATION; ++i) {
 					col_index[i] = calculate_line_col_index(spr_zindex[i], spr_col_index[i], l1_col_index[i], l2_col_index[i]);
