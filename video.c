@@ -247,19 +247,19 @@ struct video_layer_properties
 struct video_layer_properties layer_properties[2];
 
 static int
-calc_layer_eff_x(struct video_layer_properties *props, int x)
+calc_layer_eff_x(const struct video_layer_properties *props, const int x)
 {
 	return (x + props->hscroll) & (props->layerw_max);
 }
 
 static int
-calc_layer_eff_y(struct video_layer_properties *props, int y)
+calc_layer_eff_y(const struct video_layer_properties *props, const int y)
 {
 	return (y + props->vscroll) & (props->layerh_max);
 }
 
 static uint32_t
-calc_layer_map_addr_base2(struct video_layer_properties *props, int eff_x, int eff_y)
+calc_layer_map_addr_base2(const struct video_layer_properties *props, const int eff_x, const int eff_y)
 {
 	// Slightly faster on some platforms because we know that tilew and tileh are powers of 2.
 	return props->map_base + ((((eff_y >> props->tileh_log2) << props->mapw_log2) + (eff_x >> props->tilew_log2)) << 1);
@@ -271,8 +271,8 @@ calc_layer_map_addr_base2(struct video_layer_properties *props, int eff_x, int e
 //{
 //	return props->map_base + ((eff_y / props->tileh) * props->mapw + (eff_x / props->tilew)) * 2;
 //}
-
-void refresh_layer_properties(uint8_t layer)
+static void
+refresh_layer_properties(const uint8_t layer)
 {
 	struct video_layer_properties* props = &layer_properties[layer];
 
@@ -358,13 +358,15 @@ struct video_sprite_properties
 
 	int16_t sprite_x;
 	int16_t sprite_y;
+	uint8_t sprite_width_log2;
+	uint8_t sprite_height_log2;
 	uint8_t sprite_width;
 	uint8_t sprite_height;
 
 	bool hflip;
 	bool vflip;
 
-	bool mode;
+	uint8_t color_mode;
 	uint32_t sprite_address;
 
 	uint16_t palette_offset;
@@ -372,7 +374,8 @@ struct video_sprite_properties
 
 struct video_sprite_properties sprite_properties[128];
 
-void refresh_sprite_properties(uint16_t sprite)
+static void
+refresh_sprite_properties(const uint16_t sprite)
 {
 	struct video_sprite_properties* props = &sprite_properties[sprite];
 
@@ -380,8 +383,10 @@ void refresh_sprite_properties(uint16_t sprite)
 
 	props->sprite_x = sprite_data[sprite][2] | (sprite_data[sprite][3] & 3) << 8;
 	props->sprite_y = sprite_data[sprite][4] | (sprite_data[sprite][5] & 3) << 8;
-	props->sprite_width = 1 << (((sprite_data[sprite][7] >> 4) & 3) + 3);
-	props->sprite_height = 1 << ((sprite_data[sprite][7] >> 6) + 3);
+	props->sprite_width_log2  = (((sprite_data[sprite][7] >> 4) & 3) + 3);
+	props->sprite_height_log2 = ((sprite_data[sprite][7] >> 6) + 3);
+	props->sprite_width       = 1 << props->sprite_width_log2;
+	props->sprite_height      = 1 << props->sprite_height_log2;
 
 	// fix up negative coordinates
 	if (props->sprite_x >= 0x400 - props->sprite_width) {
@@ -394,7 +399,7 @@ void refresh_sprite_properties(uint16_t sprite)
 	props->hflip = sprite_data[sprite][6] & 1;
 	props->vflip = (sprite_data[sprite][6] >> 1) & 1;
 
-	props->mode = (sprite_data[sprite][1] >> 7) & 1;
+	props->color_mode     = (sprite_data[sprite][1] >> 7) & 1;
 	props->sprite_address = sprite_data[sprite][0] << 5 | (sprite_data[sprite][1] & 0xf) << 13;
 
 	props->palette_offset = (sprite_data[sprite][7] & 0x0f) << 4;
@@ -408,9 +413,10 @@ struct video_palette
 
 struct video_palette video_palette;
 
-static void refresh_palette() {
-	uint8_t out_mode = reg_composer[0] & 3;
-	bool chroma_disable = (reg_composer[0] >> 2) & 1;
+static void
+refresh_palette() {
+	const uint8_t out_mode = reg_composer[0] & 3;
+	const bool chroma_disable = (reg_composer[0] >> 2) & 1;
 	for (int i = 0; i < 256; ++i) {
 		uint8_t r;
 		uint8_t g;
@@ -437,17 +443,30 @@ static void refresh_palette() {
 }
 
 static void
-render_sprite_line(uint16_t y)
+expand_4bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
 {
-	for (int i = 0; i < SCREEN_WIDTH; i++) {
-		sprite_line_col[i] = 0;
-		sprite_line_z[i] = 0;
+	while (dst_size >= 2) {
+		*dst = (*src) >> 4;
+		++dst;
+		*dst = (*src) & 0xf;
+		++dst;
+
+		++src;
+		dst_size -= 2;
 	}
+}
+
+static void
+render_sprite_line(const uint16_t y)
+{
+	memset(sprite_line_col, 0, SCREEN_WIDTH);
+	memset(sprite_line_z, 0, SCREEN_WIDTH);
+
 	uint16_t sprite_budget = 800 + 1;
 	for (int i = 0; i < NUM_SPRITES; i++) {
 		// one clock per lookup
 		sprite_budget--; if (sprite_budget == 0) break;
-		struct video_sprite_properties *props = &sprite_properties[i];
+		const struct video_sprite_properties *props = &sprite_properties[i];
 
 		if (props->sprite_zdepth == 0) {
 			continue;
@@ -458,50 +477,44 @@ render_sprite_line(uint16_t y)
 			continue;
 		}
 
-		for (uint16_t sx = 0; sx < props->sprite_width; sx++) {
-			uint16_t line_x = props->sprite_x + sx;
+		const uint16_t eff_sy = props->vflip ? ((props->sprite_height - 1) - (y - props->sprite_y)) : (y - props->sprite_y);
+
+		int16_t       eff_sx      = (props->hflip ? (props->sprite_width - 1) : 0);
+		const int16_t eff_sx_incr = props->hflip ? -1 : 1;
+
+		const uint8_t *bitmap_data = video_ram + props->sprite_address + (eff_sy << (props->sprite_width_log2 - (1 - props->color_mode)));
+
+		uint8_t unpacked_sprite_line[64];
+		if (props->color_mode == 0) {
+			// 4bpp
+			expand_4bpp_data(unpacked_sprite_line, bitmap_data, props->sprite_width);
+		} else {
+			// 8bpp
+			memcpy(unpacked_sprite_line, bitmap_data, props->sprite_width);
+		}
+		
+		for (uint16_t sx = 0; sx < props->sprite_width; ++sx) {
+			const uint16_t line_x = props->sprite_x + sx;
 			if (line_x >= SCREEN_WIDTH) {
+				eff_sx += eff_sx_incr;
 				continue;
-			}
-			uint16_t eff_sx = sx;
-			uint16_t eff_sy = y - props->sprite_y;
-
-			// flip
-			if (props->hflip) {
-				eff_sx = (props->sprite_width - 1) - eff_sx;
-			}
-			if (props->vflip) {
-				eff_sy = (props->sprite_height - 1) - eff_sy;
-			}
-
-			uint8_t col_index = 0;
-			uint32_t vaddr;
-			if (props->mode == 0) {
-				// 4 bpp
-				vaddr = props->sprite_address + (eff_sy * props->sprite_width >> 1) + (eff_sx >> 1);
-				uint8_t byte = video_ram[vaddr];
-				if (eff_sx & 1) {
-					col_index = byte & 0xf;
-				} else {
-					col_index = byte >> 4;
-				}
-			} else {
-				// 8 bpp
-				vaddr = props->sprite_address + eff_sy * props->sprite_width + eff_sx;
-				col_index = video_ram[vaddr];
 			}
 
 			// one clock per fetched 32 bits
-			if (!(vaddr & 3)) {
+			if (!(sx & 3)) {
 				sprite_budget--; if (sprite_budget == 0) break;
 			}
+
 			// one clock per rendered pixel
 			sprite_budget--; if (sprite_budget == 0) break;
+
+			const uint8_t col_index = unpacked_sprite_line[eff_sx];
+			eff_sx += eff_sx_incr;
+
 			// palette offset
 			if (col_index > 0) {
-				col_index += props->palette_offset;
 				if (props->sprite_zdepth > sprite_line_z[line_x]) {
-					sprite_line_col[line_x] = col_index;
+					sprite_line_col[line_x] = col_index + props->palette_offset;
 					sprite_line_z[line_x] = props->sprite_zdepth;
 				}
 			}
@@ -512,42 +525,38 @@ render_sprite_line(uint16_t y)
 static void
 render_layer_line_text(uint8_t layer, uint16_t y)
 {
-	struct video_layer_properties *props = &layer_properties[layer];
+	const struct video_layer_properties *props = &layer_properties[layer];
 
-	uint8_t  tile_bytes[512]; // max 256 tiles, 2 bytes each.
-	uint32_t map_addr_begin = 0;
-	uint32_t map_addr_end   = 0;
+	const uint8_t max_pixels_per_byte = (8 >> props->color_depth) - 1;
+	const int     eff_y               = calc_layer_eff_y(props, y);
+	const int     yy                  = eff_y & props->tileh_max;
 
-	int eff_y = calc_layer_eff_y(props, y);
+	// additional bytes to reach the correct line of the tile
+	const uint32_t y_add = (yy << props->tilew_log2) >> 3;
+
+	const uint32_t map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
+	const uint32_t map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
+	const int      size           = (map_addr_end - map_addr_begin) + 2;
+
+	uint8_t tile_bytes[512]; // max 256 tiles, 2 bytes each.
+	video_space_read_range(tile_bytes, map_addr_begin, size);
+
+	uint32_t tile_start;
+
+	uint8_t  fg_color;
+	uint8_t  bg_color;
+	uint8_t  s;
+	uint8_t  color_shift;
+
 	{
-		map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
-		map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
-		int size       = (map_addr_end - map_addr_begin) + 2;
-
-		video_space_read_range(tile_bytes, map_addr_begin, size);
-	}
-
-	// Render tile line.
-	for (int x = 0; x < SCREEN_WIDTH; x++) {
-		uint8_t col_index = 0;
-
-		// Scrolling
-		int eff_x = calc_layer_eff_x(props, x);
-
-		int xx = eff_x & props->tilew_max;
-		int yy = eff_y & props->tileh_max;
-
-		uint16_t tile_index     = 0;
-		uint8_t  fg_color       = 0;
-		uint8_t  bg_color       = 0;
+		const int eff_x = calc_layer_eff_x(props, 0);
+		const int xx    = eff_x & props->tilew_max;
 
 		// extract all information from the map
-		uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
+		const uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
 
-		uint8_t byte0 = tile_bytes[map_addr];
-		uint8_t byte1 = tile_bytes[map_addr + 1];
-
-		tile_index = byte0;
+		const uint8_t tile_index = tile_bytes[map_addr];
+		const uint8_t byte1      = tile_bytes[map_addr + 1];
 
 		if (!props->text_mode_256c) {
 			fg_color = byte1 & 15;
@@ -558,19 +567,54 @@ render_layer_line_text(uint8_t layer, uint16_t y)
 		}
 
 		// offset within tilemap of the current tile
-		uint32_t tile_start = tile_index << props->tile_size_log2;
-		// additional bytes to reach the correct line of the tile
-		uint32_t y_add		= (yy << props->tilew_log2) >> 3;
+		tile_start = tile_index << props->tile_size_log2;
+
 		// additional bytes to reach the correct column of the tile
-		uint16_t x_add       = xx >> 3;
-		uint32_t tile_offset = tile_start + y_add + x_add;
-		uint8_t  s           = video_space_read(props->tile_base + tile_offset);
+		const uint16_t x_add       = xx >> 3;
+		const uint32_t tile_offset = tile_start + y_add + x_add;
+
+		s           = video_space_read(props->tile_base + tile_offset);
+		color_shift = max_pixels_per_byte - xx;
+	}
+
+	// Render tile line.
+	for (int x = 0; x < SCREEN_WIDTH; x++) {
+		// Scrolling
+		const int eff_x = calc_layer_eff_x(props, x);
+		const int xx = eff_x & props->tilew_max;
+
+		if ((eff_x & 0x7) == 0) {
+			if ((eff_x & props->tilew_max) == 0) {
+				// extract all information from the map
+				const uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
+
+				const uint8_t tile_index = tile_bytes[map_addr];
+				const uint8_t byte1      = tile_bytes[map_addr + 1];
+
+				if (!props->text_mode_256c) {
+					fg_color = byte1 & 15;
+					bg_color = byte1 >> 4;
+				} else {
+					fg_color = byte1;
+					bg_color = 0;
+				}
+
+				// offset within tilemap of the current tile
+				tile_start = tile_index << props->tile_size_log2;
+			}
+
+			// additional bytes to reach the correct column of the tile
+			const uint16_t x_add       = xx >> 3;
+			const uint32_t tile_offset = tile_start + y_add + x_add;
+
+			s           = video_space_read(props->tile_base + tile_offset);
+			color_shift = max_pixels_per_byte;
+		}
 
 		// convert tile byte to indexed color
-		col_index = (s >> (7 - (xx & 7))) & 1;
-		col_index = col_index ? fg_color : bg_color;
-
-		layer_line[layer][x] = col_index;
+		const uint8_t col_index = (s >> color_shift) & 1;
+		--color_shift;
+		layer_line[layer][x] = col_index ? fg_color : bg_color;
 	}
 }
 
@@ -579,65 +623,112 @@ render_layer_line_tile(uint8_t layer, uint16_t y)
 {
 	struct video_layer_properties *props = &layer_properties[layer];
 
-	// Load in tile bytes if not in bitmap mode.
-	uint8_t  tile_bytes[512]; // max 256 tiles, 2 bytes each.
-	uint32_t map_addr_begin = 0;
-	uint32_t map_addr_end   = 0;
+	const uint8_t max_pixels_per_byte = (8 >> props->color_depth) - 1;
+	const int     eff_y               = calc_layer_eff_y(props, y);
+	const uint8_t yy                  = eff_y & props->tileh_max;
+	const uint8_t yy_flip             = yy ^ props->tileh_max;
+	const uint32_t y_add              = (yy << (props->tilew_log2 + props->color_depth - 3));
+	const uint32_t y_add_flip         = (yy_flip << (props->tilew_log2 + props->color_depth - 3));
 
-	int eff_y = calc_layer_eff_y(props, y);
+	const uint32_t map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
+	const uint32_t map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
+	const int      size           = (map_addr_end - map_addr_begin) + 2;
+
+	uint8_t tile_bytes[512]; // max 256 tiles, 2 bytes each.
+	video_space_read_range(tile_bytes, map_addr_begin, size);
+
+	uint8_t  palette_offset;
+	bool     vflip;
+	bool     hflip;
+	uint32_t tile_start;
+	uint8_t  s;
+	uint8_t  color_shift;
+	int8_t   color_shift_incr;
+
 	{
-		map_addr_begin = calc_layer_map_addr_base2(props, props->min_eff_x, eff_y);
-		map_addr_end   = calc_layer_map_addr_base2(props, props->max_eff_x, eff_y);
-		int size           = (map_addr_end - map_addr_begin) + 2;
+		const int eff_x = calc_layer_eff_x(props, 0);
 
-		video_space_read_range(tile_bytes, map_addr_begin, size);
+		// extract all information from the map
+		const uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
+
+		const uint8_t byte0 = tile_bytes[map_addr];
+		const uint8_t byte1 = tile_bytes[map_addr + 1];
+
+		// Tile Flipping
+		vflip = (byte1 >> 3) & 1;
+		hflip = (byte1 >> 2) & 1;
+
+		palette_offset = byte1 & 0xf0;
+
+		// offset within tilemap of the current tile
+		const uint16_t tile_index = byte0 | ((byte1 & 3) << 8);
+		tile_start                = tile_index << props->tile_size_log2;
+
+		color_shift_incr = hflip ? props->bits_per_pixel : -props->bits_per_pixel;
+
+		int xx = eff_x & props->tilew_max;
+		if (hflip) {
+			xx          = xx ^ (props->tilew_max);
+			color_shift = 0;
+		} else {
+			color_shift = props->first_color_pos;
+		}
+
+		// additional bytes to reach the correct column of the tile
+		uint16_t x_add       = (xx << props->color_depth) >> 3;
+		uint32_t tile_offset = tile_start + (vflip ? y_add_flip : y_add) + x_add;
+
+		s = video_space_read(props->tile_base + tile_offset);
 	}
+
 
 	// Render tile line.
 	for (int x = 0; x < SCREEN_WIDTH; x++) {
-		int eff_x = calc_layer_eff_x(props, x);
+		const int eff_x = calc_layer_eff_x(props, x);
 
-		int xx = eff_x & props->tilew_max;
-		int yy = eff_y & props->tileh_max;
+		if ((eff_x & max_pixels_per_byte) == 0) {
+			if ((eff_x & props->tilew_max) == 0) {
+				// extract all information from the map
+				const uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
 
-		uint16_t tile_index     = 0;
-		uint8_t  palette_offset = 0;
+				const uint8_t byte0 = tile_bytes[map_addr];
+				const uint8_t byte1 = tile_bytes[map_addr + 1];
 
-		// extract all information from the map
-		uint32_t map_addr = calc_layer_map_addr_base2(props, eff_x, eff_y) - map_addr_begin;
+				// Tile Flipping
+				vflip = (byte1 >> 3) & 1;
+				hflip = (byte1 >> 2) & 1;
 
-		uint8_t byte0 = tile_bytes[map_addr];
-		uint8_t byte1 = tile_bytes[map_addr + 1];
+				palette_offset = byte1 & 0xf0;
 
-		tile_index = byte0 | ((byte1 & 3) << 8);
+				// offset within tilemap of the current tile
+				const uint16_t tile_index = byte0 | ((byte1 & 3) << 8);
+				tile_start                = tile_index << props->tile_size_log2;
 
-		// Tile Flipping
-		bool vflip = (byte1 >> 3) & 1;
-		bool hflip = (byte1 >> 2) & 1;
-		if (vflip) {
-			yy = yy ^ (props->tileh_max);
+				color_shift_incr = hflip ? props->bits_per_pixel : -props->bits_per_pixel;
+			}
+
+			int xx = eff_x & props->tilew_max;
+			if (hflip) {
+				xx = xx ^ (props->tilew_max);
+				color_shift = 0;
+			} else {
+				color_shift = props->first_color_pos;
+			}
+
+			// additional bytes to reach the correct column of the tile
+			const uint16_t x_add       = (xx << props->color_depth) >> 3;
+			const uint32_t tile_offset = tile_start + (vflip ? y_add_flip : y_add) + x_add;
+
+			s = video_space_read(props->tile_base + tile_offset);
 		}
-		if (hflip) {
-			xx = xx ^ (props->tilew_max);
-		}
-
-		palette_offset = byte1 >> 4;
-
-		// offset within tilemap of the current tile
-		uint32_t tile_start = tile_index << props->tile_size_log2;
-		// additional bytes to reach the correct line of the tile
-		uint32_t y_add = (yy << (props->tilew_log2 + props->color_depth)) >> 3;
-		// additional bytes to reach the correct column of the tile
-		uint16_t x_add       = (xx << props->color_depth) >> 3;
-		uint32_t tile_offset = tile_start + y_add + x_add;
-		uint8_t  s           = video_space_read(props->tile_base + tile_offset);
 
 		// convert tile byte to indexed color
-		uint8_t col_index = (s >> (props->first_color_pos - ((xx & props->color_fields_max) << props->color_depth))) & props->color_mask;
+		uint8_t col_index = (s >> color_shift) & props->color_mask;
+		color_shift += color_shift_incr;
 
 		// Apply Palette Offset
 		if (palette_offset && col_index > 0 && col_index < 16) {
-			col_index += palette_offset << 4;
+			col_index += palette_offset;
 		}
 		layer_line[layer][x] = col_index;
 	}
