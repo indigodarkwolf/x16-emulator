@@ -14,4 +14,11 @@ x16emu.html.mem
 x16emu.js
 x16emu.wasm
 x16emu.worker.js
-
+*.sym
+*.SYM
+*.prg
+*.PRG
+*.bin
+*.BIN
+*.html
+*.css
