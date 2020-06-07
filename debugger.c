@@ -80,7 +80,7 @@ static void DEBUGExecCmd();
 #define DBGSCANKEY_SHOW	SDL_SCANCODE_TAB 						// Show screen key.
 																// *** MUST BE SCAN CODES ***
 
-enum DBG_CMD { CMD_DUMP_MEM='m', CMD_DISASM='d', CMD_SET_BANK='b', CMD_SET_REGISTER='r' };
+enum DBG_CMD { CMD_DUMP_MEM='m', CMD_DISASM='d', CMD_SET_BANK='b', CMD_SET_REGISTER='r', CMD_FILL_MEMORY='f' };
 
 // RGB colours
 const SDL_Color col_bkgnd= {0, 0, 0, 255};
@@ -156,6 +156,11 @@ int  DEBUGGetCurrentStatus(void) {
 										SDL_GetModState() & (KMOD_LSHIFT|KMOD_RSHIFT));
 					break;
 
+				case SDL_WINDOWEVENT:
+					if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+						return -1;
+					}
+					break;
 			}
 		}
 	}
@@ -373,6 +378,21 @@ static void DEBUGExecCmd() {
 			if(!strcmp(reg, "sp")) {
 				sp= number & 0x00FF;
 			}
+			break;
+
+		case CMD_FILL_MEMORY:
+			sscanf(line, "%x %x", &addr, &number);
+			// Banked Memory, RAM then ROM
+			if (addr >= 0xA000) {
+				currentBank = (addr & 0xFF0000) >> 16;
+				memory_set_ram_bank(currentBank);
+			}
+
+			addr        = addr & 0xFFFF;
+			currentData = addr;
+
+			write6502(addr, number);
+
 			break;
 
 		default:

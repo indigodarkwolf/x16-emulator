@@ -182,6 +182,16 @@ void irq6502() {
     pc = (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
 }
 
+uint8_t get_status6502() {
+	return status;
+}
+
+uint16_t get_pc6502()
+{
+	return pc;
+}
+
+
 uint8_t callexternal = 0;
 void (*loopexternal)();
 

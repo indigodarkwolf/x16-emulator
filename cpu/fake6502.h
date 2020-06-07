@@ -13,4 +13,7 @@ extern void exec6502(uint32_t tickcount);
 extern void irq6502();
 extern uint32_t clockticks6502;
 
+extern uint8_t get_status6502();
+extern uint16_t get_pc6502();
+
 #endif
