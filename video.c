@@ -416,8 +416,8 @@ refresh_sprite_properties(const uint16_t sprite)
 	if (props->sprite_x >= 0x400 - props->sprite_width) {
 		props->sprite_x |= 0xff00 - 0x200;
 	}
-	if (props->sprite_y >= 0x200 - props->sprite_height) {
-		props->sprite_y |= 0xff00 - 0x100;
+	if (props->sprite_y >= 0x400 - props->sprite_height) {
+		props->sprite_y |= 0xff00 - 0x200;
 	}
 
 	props->hflip = sprite_data[sprite][6] & 1;
@@ -429,13 +429,13 @@ refresh_sprite_properties(const uint16_t sprite)
 	props->palette_offset = (sprite_data[sprite][7] & 0x0f) << 4;
 }
 
-struct video_palette
+struct video_palette_expanded
 {
 	uint32_t entries[256];
 	bool dirty;
 };
 
-struct video_palette video_palette;
+struct video_palette_expanded video_palette;
 
 static void
 refresh_palette() {
@@ -1075,12 +1075,14 @@ video_step(float mhz)
 			render_line(y);
 		}
 		scan_pos_y++;
-		if (scan_pos_y == SCAN_HEIGHT) {
-			scan_pos_y = 0;
+		if (scan_pos_y == front_porch + SCREEN_HEIGHT) {
 			new_frame = true;
 			if (ien & 1) { // VSYNC IRQ
 				isr |= 1;
 			}
+		}
+		if (scan_pos_y == SCAN_HEIGHT) {
+			scan_pos_y = 0;
 		}
 		if (ien & 2) { // LINE IRQ
 			y = scan_pos_y - front_porch;
