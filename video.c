@@ -196,7 +196,7 @@ video_init(int window_scale, char *quality)
 	SDL_SetWindowResizable(cpu_window, true);
 #endif
 	SDL_RenderSetLogicalSize(cpu_renderer, SCAN_WIDTH, SCAN_HEIGHT);
-
+	SDL_SetWindowTitle(cpu_window, "X16 execution visualization");
 	{
 		int x, y;
 		SDL_GetWindowPosition(window, &x, &y);
@@ -1138,20 +1138,24 @@ video_update()
 		}
 	}
 
-	SDL_RenderClear(cpu_renderer);
-	SDL_RenderCopy(cpu_renderer, cpu_sdlTexture, NULL, NULL);
-	SDL_RenderPresent(cpu_renderer);
-
 	SDL_RenderClear(renderer);
 	SDL_RenderCopy(renderer, sdlTexture, NULL, NULL);
 
 	if (debugger_enabled && showDebugOnRender != 0) {
 		DEBUGRenderDisplay(SCREEN_WIDTH, SCREEN_HEIGHT);
 		SDL_RenderPresent(renderer);
+
+		SDL_RenderClear(cpu_renderer);
+		SDL_RenderCopy(cpu_renderer, cpu_sdlTexture, NULL, NULL);
+		SDL_RenderPresent(cpu_renderer);
 		return true;
 	}
 
 	SDL_RenderPresent(renderer);
+
+	SDL_RenderClear(cpu_renderer);
+	SDL_RenderCopy(cpu_renderer, cpu_sdlTexture, NULL, NULL);
+	SDL_RenderPresent(cpu_renderer);
 
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
