@@ -465,14 +465,7 @@ expand_4bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
 static void
 render_sprite_line(const uint16_t y)
 {
-	if (!(reg_composer[0] & 0x40)) {
-		// sprites disabled
-		sprite_line_empty = true;
-		return;
-	}
-  
-	sprite_line_empty = false;
-  memset(sprite_line_col, 0, SCREEN_WIDTH);
+	memset(sprite_line_col, 0, SCREEN_WIDTH);
 	memset(sprite_line_z, 0, SCREEN_WIDTH);
 	memset(sprite_line_mask, 0, SCREEN_WIDTH);
 
