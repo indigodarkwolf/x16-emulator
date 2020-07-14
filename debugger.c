@@ -98,10 +98,11 @@ const SDL_Color col_data= {0, 255, 255, 255};
 const SDL_Color col_highlight= {255, 255, 0, 255};
 const SDL_Color col_cmdLine= {255, 255, 255, 255};
 
-const SDL_Color col_vram_tilemap = {0, 255, 255, 255};
+const SDL_Color col_vram_tilemap  = {0, 255, 255, 255};
 const SDL_Color col_vram_tiledata = {0, 255, 0, 255};
 const SDL_Color col_vram_special  = {255, 92, 92, 255};
-const SDL_Color col_vram_other  = {128, 128, 128, 255};
+const SDL_Color col_vram_sprite   = {255, 192, 92, 255};
+const SDL_Color col_vram_other    = {128, 128, 128, 255};
 
 int showDebugOnRender = 0;										// Used to trigger rendering in video.c
 int showFullDisplay = 0; 										// If non-zero show the whole thing.
@@ -572,12 +573,14 @@ DEBUGRenderVRAM(int y, int data)
 			int addr = (data + i) & 0x1FFFF;
 			int byte = video_space_read(addr);
 
-			if (video_is_tilemap_address(addr)) {
+			if (video_is_special_address(addr)) {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_special);
+			} else if (video_is_sprite_address(addr)) {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_sprite);
+			} else if (video_is_tilemap_address(addr)) {
 				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_tilemap);
 			} else if (video_is_tiledata_address(addr)) {
 				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_tiledata);
-			} else if (video_is_special_address(addr)) {
-				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_special);
 			} else {
 				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_other);
 			}

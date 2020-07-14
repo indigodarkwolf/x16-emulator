@@ -1394,6 +1394,10 @@ video_update_title(const char* window_title)
 bool video_is_tilemap_address(int addr)
 {
 	for (int l = 0; l < 2; ++l) {
+		if (!layer_line_enable[l]) {
+			continue;
+		}
+
 		struct video_layer_properties *props = &layer_properties[l];
 		if (addr < props->map_base) {
 			continue;
@@ -1410,6 +1414,10 @@ bool video_is_tilemap_address(int addr)
 bool video_is_tiledata_address(int addr)
 {
 	for (int l = 0; l < 2; ++l) {
+		if (!layer_line_enable[l]) {
+			continue;
+		}
+
 		struct video_layer_properties *props = &layer_properties[l];
 		if (addr < props->tile_base) {
 			continue;
@@ -1427,4 +1435,31 @@ bool video_is_tiledata_address(int addr)
 bool video_is_special_address(int addr)
 {
 	return addr >= 0x1F9C0;
+}
+
+bool video_is_sprite_address(int addr)
+{
+	if (!sprite_line_enable) {
+		return false;
+	}
+
+	for (int s = 0; s < 128; ++s) {
+		struct video_sprite_properties *props = &sprite_properties[s];
+		if (props->sprite_zdepth == 0) {
+			continue;
+		}
+
+		if (addr < props->sprite_address) {
+			continue;
+		}
+
+		int sprite_size = props->sprite_width * props->sprite_height * (4 << props->color_mode) / 8;
+		if (addr >= props->sprite_address + sprite_size) {
+			continue;
+		}
+
+		return true;
+	}
+
+	return false;
 }

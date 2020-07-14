@@ -69,5 +69,6 @@ extern void init_audio();
 extern bool video_is_tilemap_address(int addr);
 extern bool video_is_tiledata_address(int addr);
 extern bool video_is_special_address(int addr);
+extern bool video_is_sprite_address(int addr);
 
 #endif
