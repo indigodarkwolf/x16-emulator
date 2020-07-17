@@ -40,6 +40,9 @@ static void DEBUGRenderCmdLine();
 static bool DEBUGBuildCmdLine(SDL_Keycode key);
 static void DEBUGExecCmd();
 
+static uint8_t read_diff(uint16_t address, bool debugOn, uint8_t bank);
+static uint16_t find_diff(uint16_t start_address, int search_incr);
+
 // *******************************************************************************************
 //
 //		This is the minimum-interference flag. It's designed so that when
@@ -289,7 +292,11 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 			if (dumpmode == DDUMP_RAM) {
 				currentData = (currentData + 0x128) & 0xFFFF;
 			} else if (dumpmode == DDUMP_RAMDIFF) {
-				currentData = (currentData + 0x094) & 0xFFFF;
+				if (isShift) {
+					currentData = find_diff(currentData, 1);
+				} else {
+					currentData = (currentData + 0x094) & 0xFFFF;
+				}
 			} else {
 				currentData = (currentData + 0x250) & 0x1FFFF;
 			}
@@ -299,7 +306,11 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 			if (dumpmode == DDUMP_RAM) {
 				currentData = (currentData - 0x128) & 0xFFFF;
 			} else if (dumpmode == DDUMP_RAMDIFF) {
-				currentData = (currentData - 0x094) & 0xFFFF;
+				if (isShift) {
+					currentData = find_diff(currentData, -1);
+				} else {
+					currentData = (currentData - 0x094) & 0xFFFF;
+				}
 			} else {
 				currentData = (currentData - 0x250) & 0x1FFFF;
 			}
@@ -364,6 +375,19 @@ read_diff(uint16_t address, bool debugOn, uint8_t bank)
 	} else { // banked ROM
 		return real_read6502(address, debugOn, bank);
 	}
+}
+
+static uint16_t find_diff(uint16_t start_address, int search_incr)
+{
+	uint16_t address = start_address;
+
+	do {
+		address += search_incr;
+		if (real_read6502(address, true, currentBank) != read_diff(address, true, currentBank)) {
+			return address;
+		}
+	} while (address != start_address);
+	return start_address;
 }
 
 static void DEBUGExecCmd() {
