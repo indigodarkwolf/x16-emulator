@@ -29,8 +29,10 @@ static void DEBUGAddress(int x, int y, int bank, int addr, SDL_Color colour);
 static void DEBUGVAddress(int x, int y, int addr, SDL_Color colour);
 
 static void DEBUGRenderData(int y,int data);
+static void DEBUGRenderDiffData(int y, int data);
 static void DEBUGRenderZeroPageRegisters(int y);
-static int DEBUGRenderRegisters(void);
+static void DEBUGRenderDiffZeroPageRegisters(int y);
+static int  DEBUGRenderRegisters(void);
 static void DEBUGRenderVRAM(int y, int data);
 static void DEBUGRenderCode(int lines,int initialPC);
 static void DEBUGRenderStack(int bytesCount);
@@ -88,6 +90,7 @@ static void DEBUGExecCmd();
 
 #define DDUMP_RAM	0
 #define DDUMP_VERA	1
+#define DDUMP_RAMDIFF 2
 
 enum DBG_CMD { CMD_DUMP_MEM='m', CMD_DUMP_VERA='v', CMD_DISASM='d', CMD_SET_BANK='b', CMD_SET_REGISTER='r', CMD_FILL_MEMORY='f' };
 
@@ -103,6 +106,8 @@ const SDL_Color col_vram_tiledata = {0, 255, 0, 255};
 const SDL_Color col_vram_special  = {255, 92, 92, 255};
 const SDL_Color col_vram_sprite   = {255, 192, 92, 255};
 const SDL_Color col_vram_other    = {128, 128, 128, 255};
+
+const SDL_Color col_data_changed = {255, 92, 92, 255};
 
 int showDebugOnRender = 0;										// Used to trigger rendering in video.c
 int showFullDisplay = 0; 										// If non-zero show the whole thing.
@@ -283,6 +288,8 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 		case SDLK_PAGEDOWN:
 			if (dumpmode == DDUMP_RAM) {
 				currentData = (currentData + 0x128) & 0xFFFF;
+			} else if (dumpmode == DDUMP_RAMDIFF) {
+				currentData = (currentData + 0x094) & 0xFFFF;
 			} else {
 				currentData = (currentData + 0x250) & 0x1FFFF;
 			}
@@ -291,6 +298,8 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 		case SDLK_PAGEUP:
 			if (dumpmode == DDUMP_RAM) {
 				currentData = (currentData - 0x128) & 0xFFFF;
+			} else if (dumpmode == DDUMP_RAMDIFF) {
+				currentData = (currentData - 0x094) & 0xFFFF;
 			} else {
 				currentData = (currentData - 0x250) & 0x1FFFF;
 			}
@@ -339,6 +348,24 @@ static bool DEBUGBuildCmdLine(SDL_Keycode key) {
 	return (key == SDLK_RETURN) || (key == SDLK_KP_ENTER);
 }
 
+static uint8_t *Snapshot_ram = NULL;
+
+static uint8_t
+read_diff(uint16_t address, bool debugOn, uint8_t bank)
+{
+	bank %= num_ram_banks;
+
+	if (address < 0x9f00) { // RAM
+		return Snapshot_ram[address];
+	} else if (address < 0xa000) { // I/O
+		return 0xff;
+	} else if (address < 0xc000) { // banked RAM
+		return Snapshot_ram[0xa000 + (bank << 13) + address - 0xa000];
+	} else { // banked ROM
+		return real_read6502(address, debugOn, bank);
+	}
+}
+
 static void DEBUGExecCmd() {
 	int number, addr, size, incr;
 	char reg[10];
@@ -350,6 +377,35 @@ static void DEBUGExecCmd() {
 		line++;
 	}
 	// printf("cmd:%c line: '%s'\n", cmd, line);
+
+	if (strcmp(cmdLine, "snap") == 0) {
+		if (Snapshot_ram != NULL) {
+			free(Snapshot_ram);
+		}
+		Snapshot_ram = malloc(RAM_SIZE);
+
+		for (uint16_t i = 0; i < 0x9f00; ++i) {
+			Snapshot_ram[i] = real_read6502(i, true, 0);
+		}
+		for (uint16_t i = 0x9f00; i < 0xa000; ++i) {
+			Snapshot_ram[i] = 0;
+		}
+		for (uint16_t b = 0; b < num_ram_banks; ++b) {
+			for (uint16_t i = 0xa000; i < 0xc000; ++i) {
+				Snapshot_ram[0xa000 + (b << 13) + i - 0xa000] = real_read6502(i, true, b);
+			}
+		}
+		currentPosInLine = currentLineLen = *cmdLine = 0;
+		return;
+	}
+
+	if (strcmp(cmdLine, "diff") == 0) {
+		if (Snapshot_ram != NULL) {
+			dumpmode         = DDUMP_RAMDIFF;
+		}
+		currentPosInLine = currentLineLen = *cmdLine = 0;
+		return;
+	}
 
 	switch (cmd) {
 		case CMD_DUMP_MEM:
@@ -477,6 +533,9 @@ void DEBUGRenderDisplay(int width, int height) {
 	if (dumpmode == DDUMP_RAM) {
 		DEBUGRenderData(21, currentData);
 		DEBUGRenderZeroPageRegisters(21);
+	} else if (dumpmode == DDUMP_RAMDIFF) {
+		DEBUGRenderDiffData(21, currentData);
+		DEBUGRenderDiffZeroPageRegisters(21);		
 	} else {
 		DEBUGRenderVRAM(21, currentData);
 	}
@@ -541,6 +600,42 @@ static void DEBUGRenderZeroPageRegisters(int y) {
    if (oldRegisterTicks != clockticks6502) {
       oldRegisterTicks = clockticks6502;
    }
+#undef LAST_R
+}
+
+static void DEBUGRenderDiffZeroPageRegisters(int y)
+{
+#define LAST_R 15
+	int  reg     = 0;
+	int  y_start = y;
+	char lbl[6];
+	while (reg < DBGMAX_ZERO_PAGE_REGISTERS) {
+		if (((y - y_start) % 5) != 0) { // Break registers into groups of 5, easier to locate
+			if (reg <= LAST_R)
+				sprintf(lbl, "R%d", reg);
+			else
+				sprintf(lbl, "x%d", reg);
+
+			DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
+
+			int reg_addr = 2 + reg * 2;
+			int n        = real_read6502(reg_addr + 1, true, currentBank) * 256 + real_read6502(reg_addr, true, currentBank);
+			int n2       = read_diff(reg_addr + 1, true, currentBank) * 256 + read_diff(reg_addr, true, currentBank);
+
+			SDL_Color c        = (n == n2) ? col_data : col_data_changed;
+
+			DEBUGNumber(DBG_ZP_REG + 5, y, n, 4, c);
+			DEBUGString(dbgRenderer, DBG_ZP_REG + 9, y, "->", c);
+			DEBUGNumber(DBG_ZP_REG + 11, y, n2, 4, c);
+			reg++;
+		}
+		y++;
+	}
+
+	if (oldRegisterTicks != clockticks6502) {
+		oldRegisterTicks = clockticks6502;
+	}
+#undef LAST_R
 }
 
 // *******************************************************************************************
@@ -560,6 +655,27 @@ static void DEBUGRenderData(int y,int data) {
 		}
 		y++;
 		data += 8;
+	}
+}
+
+static void
+DEBUGRenderDiffData(int y, int data)
+{
+	while (y < DBG_HEIGHT - 2) {                                                   // To bottom of screen
+		DEBUGAddress(DBG_MEMX, y, (uint8_t)currentBank, data & 0xFFFF, col_label); // Show label.
+
+		for (int i = 0; i < 4; i++) {
+			int byte = real_read6502((data + i) & 0xFFFF, true, currentBank);
+			int byte2 = read_diff((data + i) & 0xFFFF, true, currentBank);
+
+			SDL_Color c = (byte == byte2) ? col_data : col_data_changed;
+			// "XX->XX "
+			DEBUGNumber(DBG_MEMX + 8 + i * 7, y, byte, 2, c);
+			DEBUGString(dbgRenderer, DBG_MEMX + 10 + i * 7, y, "->", c);
+			DEBUGNumber(DBG_MEMX + 12 + i * 7, y, byte2, 2, c);
+		}
+		y++;
+		data += 4;
 	}
 }
 
