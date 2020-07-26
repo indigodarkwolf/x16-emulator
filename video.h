@@ -29,5 +29,4 @@ void via1_write(uint8_t reg, uint8_t value);
 uint8_t video_space_read(uint32_t address);
 void video_space_write(uint32_t address, uint8_t value);
 
-
 #endif
