@@ -574,12 +574,10 @@ refresh_layer_properties(const uint8_t layer)
 			const int buffer_width  = (1 << (props->mapw_log2 + props->tilew_log2));
 			const int buffer_height = (1 << (props->maph_log2 + props->tileh_log2));
 			if (props->text_mode) {
-				#pragma omp parallel for 
 				for (int y = 0; y < buffer_height; ++y) {
 					prerender_layer_line_text(layer, y, props->prerendered_layer_color_index_buffer + (buffer_width * y));
 				}
 			} else if (props->tile_mode) {
-				#pragma omp parallel for
 				for (int y = 0; y < buffer_height; ++y) {
 					prerender_layer_line_tile(layer, y, props->prerendered_layer_color_index_buffer + (buffer_width * y));
 				}
@@ -1093,11 +1091,6 @@ prerender_layer_line_tile(const uint8_t layer, const uint16_t y, uint8_t *const 
 		// offset within tilemap of the current tile
 		const uint16_t tile_index = byte0 | ((byte1 & 3) << 8);
 		tile_start                = tile_index << (props->tile_size_log2 + 3 - props->color_depth);
-
-		int xx = 0;
-		if (hflip) {
-			xx = props->tilew_max;
-		}
 	}
 
 	// Render tile line.
