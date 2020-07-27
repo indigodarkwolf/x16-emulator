@@ -70,8 +70,9 @@ static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *sdlTexture;
 static bool is_fullscreen = false;
+static float         step_advance;
 
-static uint8_t video_ram[0x20000];
+    static uint8_t video_ram[0x20000];
 static uint8_t palette[256 * 2];
 static uint8_t sprite_data[128][8];
 
@@ -194,6 +195,8 @@ video_reset()
 	reg_composer[2] = 128; // vscale = 1.0
 	reg_composer[5] = 640 >> 2;
 	reg_composer[7] = 480 >> 1;
+
+	step_advance = (float)(VGA_PIXEL_FREQ) / (float)(MHZ);
 
 	// init sprite data
 	memset(sprite_data, 0, sizeof(sprite_data));
@@ -469,20 +472,18 @@ refresh_layer_properties(const uint8_t layer)
 	uint32_t signature = (uint32_t)reg_layer[layer][0] | ((uint32_t)reg_layer[layer][1] << 8) | ((uint32_t)reg_layer[layer][2] << 16);
 
 	if (props == NULL || props->signature != signature) {
-		struct video_layer_properties *new_props = find_cached_layer_properties(signature);
-		if (new_props != NULL) {
+		if (props != NULL) {
 			cache_layer_properties(props);
-			layer_properties[layer] = new_props;
-			props                   = new_props;
+		}
+		props = find_cached_layer_properties(signature);
+		if (props != NULL) {
+			layer_properties[layer] = props;
 
 			if (!props->bitmap_mode) {
 				props->hscroll = reg_layer[layer][3] | (reg_layer[layer][4] & 0xf) << 8;
 				props->vscroll = reg_layer[layer][5] | (reg_layer[layer][6] & 0xf) << 8;
 			}
 		} else {
-			if (props != NULL) {
-				cache_layer_properties(props);
-			}
 			props                   = alloc_layer_properties();
 			layer_properties[layer] = props;
 
@@ -546,7 +547,27 @@ refresh_layer_properties(const uint8_t layer)
 		}
 	}
 
-	if (!props->bitmap_mode) {
+	if (props->bitmap_mode) {
+		if (props->prerendered_tile_color_index_buffer == NULL) {
+			int tile_buffer_size = props->tilew * props->tileh;
+
+			props->prerendered_tile_color_index_buffer = malloc(tile_buffer_size);
+			switch (props->color_depth) {
+				case 0:
+					expand_1bpp_data(props->prerendered_tile_color_index_buffer, video_ram + props->tile_base, tile_buffer_size);
+					break;
+				case 1:
+					expand_2bpp_data(props->prerendered_tile_color_index_buffer, video_ram + props->tile_base, tile_buffer_size);
+					break;
+				case 2:
+					expand_4bpp_data(props->prerendered_tile_color_index_buffer, video_ram + props->tile_base, tile_buffer_size);
+					break;
+				case 3:
+					memcpy(props->prerendered_tile_color_index_buffer, video_ram + props->tile_base, tile_buffer_size);
+					break;
+			}
+		}
+	} else {
 		if (props->prerendered_tile_color_index_buffer == NULL) {
 			const int num_tiles_log2   = props->text_mode ? 8 : 12;
 			int       tile_buffer_size = 1 << (props->tilew_log2 + props->tileh_log2 + num_tiles_log2);
@@ -624,6 +645,9 @@ is_layer_map_addr(int l, uint32_t addr)
 {
 	struct video_layer_properties *props = &layer_properties_pool[l];
 
+	if (props->bitmap_mode) {
+		return false;
+	}
 	if (addr < props->map_base) {
 		return false;
 	}
@@ -756,7 +780,28 @@ poke_layer_tile(int l, uint32_t addr, uint8_t value)
 {
 	struct video_layer_properties *props = &layer_properties_pool[l];
 
-	if (!props->bitmap_mode) {
+	if (props->bitmap_mode) {
+		if (props->prerendered_tile_color_index_buffer == NULL) {
+			return;
+		}
+
+		uint32_t tile_addr = (addr - props->tile_base) << (3 - props->color_depth);
+		switch (props->color_depth) {
+			case 0:
+				expand_1bpp_data(props->prerendered_tile_color_index_buffer + tile_addr, &value, 8);
+				break;
+			case 1:
+				expand_2bpp_data(props->prerendered_tile_color_index_buffer + tile_addr, &value, 4);
+				break;
+			case 2:
+				expand_4bpp_data(props->prerendered_tile_color_index_buffer + tile_addr, &value, 2);
+				break;
+			case 3:
+				props->prerendered_tile_color_index_buffer[tile_addr] = value;
+				break;
+		}
+
+	} else {
 		clear_layer_layer_prerender(l);
 
 		if (props == layer_properties[0]) {
@@ -1131,33 +1176,17 @@ render_layer_line_bitmap(uint8_t layer, uint16_t y, const uint16_t hsize)
 {
 	struct video_layer_properties *props = layer_properties[layer];
 
-	int yy = y % props->tileh;
-	// additional bytes to reach the correct line of the tile
-	uint32_t y_add = (yy * props->tilew * props->bits_per_pixel) >> 3;
+	uint32_t line_addr = y * props->tilew;
+	uint8_t *line_data = props->prerendered_tile_color_index_buffer + line_addr;
+
+	uint8_t palette_offset = reg_layer[layer][4] & 0xf;
 
 	// Render tile line.
 	const uint32_t hscale = reg_composer[1];
 	uint32_t       xaccum = 0;
 	for (int x = 0; x < hsize; x++) {
-		const uint16_t eff_x = xaccum >> 7;
-		int            xx    = eff_x % props->tilew;
-
-		// extract all information from the map
-		uint8_t palette_offset = reg_layer[layer][4] & 0xf;
-
-		// additional bytes to reach the correct column of the tile
-		uint16_t x_add = (xx * props->bits_per_pixel) >> 3;
-		uint32_t tile_offset = y_add + x_add;
-		uint8_t s = video_space_read(props->tile_base + tile_offset);
-
-		// convert tile byte to indexed color
-		uint8_t col_index = (s >> (props->first_color_pos - ((xx & props->color_fields_max) << props->color_depth))) & props->color_mask;
-
-		// Apply Palette Offset
-		if (palette_offset && col_index > 0 && col_index < 16) {
-			col_index += palette_offset << 4;
-		}
-		layer_line[layer][x] = col_index;
+		uint8_t c = line_data[xaccum >> 7];
+		layer_line[layer][x] = c ? c + (palette_offset << 4) : 0;
 		xaccum += hscale;
 	}
 }
@@ -1330,13 +1359,12 @@ render_line(uint16_t y)
 }
 
 bool
-video_step(float mhz)
+video_step()
 {
 	uint8_t out_mode = reg_composer[0] & 3;
 
 	bool new_frame = false;
-	float advance = ((out_mode & 2) ? NTSC_PIXEL_FREQ :  VGA_PIXEL_FREQ) / mhz;
-	scan_pos_x += advance;
+	scan_pos_x += step_advance;
 	if (scan_pos_x > SCAN_WIDTH) {
 		scan_pos_x -= SCAN_WIDTH;
 		uint16_t front_porch = (out_mode & 2) ? NTSC_FRONT_PORCH_Y : VGA_FRONT_PORCH_Y;
@@ -1703,6 +1731,8 @@ void video_write(uint8_t reg, uint8_t value) {
 			int i = reg - 0x09 + (io_dcsel ? 4 : 0);
 			reg_composer[i] = value;
 			if (i == 0) {
+				step_advance = (value & 2) ? ((float)(NTSC_PIXEL_FREQ) / (float)(MHZ)) : ((float)(VGA_PIXEL_FREQ) / (float)(MHZ));
+
 				layer_line_enable[0] = value & 0x10;
 				layer_line_enable[1] = value & 0x20;
 				sprite_line_enable   = value & 0x40;
