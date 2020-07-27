@@ -1240,7 +1240,8 @@ render_line(uint16_t y)
 
 	const uint8_t  border_color = reg_composer[3];
 	const uint16_t hstart       = reg_composer[4] << 2;
-	const uint16_t hstop        = reg_composer[5] << 2;
+	const uint16_t hstop_value  = reg_composer[5] << 2;
+	const uint16_t hstop        = (hstart < hstop_value) ? hstop_value : SCREEN_WIDTH;
 	const uint16_t hsize        = hstop - hstart;
 	const uint16_t vstart       = reg_composer[6] << 1;
 	const uint16_t vstop        = reg_composer[7] << 1;
@@ -1305,27 +1306,41 @@ render_line(uint16_t y)
 				col_line[x] = border_color;
 			}
 
+			uint8_t *interior = col_line + hstart;
+
 			// Calculate color within.
-			uint8_t spr_col_index = 0;
-			uint8_t l1_col_index  = 0;
-			uint8_t l2_col_index  = 0;
-			uint8_t spr_zindex    = 0;
-
-			for (uint16_t x = 0; x < hsize; ++x) {
-				if (sprite_line_enable) {
-					spr_zindex    = sprite_line_z[x];
-					spr_col_index = sprite_line_col[x];
-				}
-
-				if (layer_line_enable[0]) {
-					l1_col_index = layer_line[0][x];
-				}
-
-				if (layer_line_enable[1]) {
-					l2_col_index = layer_line[1][x];
-				}
-
-				col_line[x] = calculate_line_col_index(spr_zindex, spr_col_index, l1_col_index, l2_col_index);
+			switch ((reg_composer[0] >> 4) & 0x7) {
+				case 0x1:
+					memcpy(interior, layer_line[0], hsize);
+					break;
+				case 0x2:
+					memcpy(interior, layer_line[1], hsize);
+					break;
+				case 0x3:
+					for (uint16_t x = 0; x < hsize; ++x) {
+						interior[x] = calculate_line_col_index(0, 0, layer_line[0][x], layer_line[1][x]);
+					}
+					break;
+				case 0x4:
+					memcpy(interior, sprite_line_col, hsize);
+					break;
+				case 0x5:
+					for (uint16_t x = 0; x < hsize; ++x) {
+						interior[x] = calculate_line_col_index(sprite_line_z[x], sprite_line_col[x], layer_line[0][x], 0);
+					}
+					break;
+				case 0x6:
+					for (uint16_t x = 0; x < hsize; ++x) {
+						interior[x] = calculate_line_col_index(sprite_line_z[x], sprite_line_col[x], 0, layer_line[1][x]);
+					}
+					break;
+				case 0x7:
+					for (uint16_t x = 0; x < hsize; ++x) {
+						interior[x] = calculate_line_col_index(sprite_line_z[x], sprite_line_col[x], layer_line[0][x], layer_line[1][x]);
+					}
+					break;
+				default:
+					break;
 			}
 		}
 
