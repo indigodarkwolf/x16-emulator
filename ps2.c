@@ -9,6 +9,7 @@
 #define HOLD 25 * 8 /* 25 x ~3 cycles at 8 MHz = 75µs */
 
 #define PS2_BUFFER_SIZE 32
+#define PS2_BUFFER_MASK (PS2_BUFFER_SIZE - 1) // As long as we stick to powers of two, this is useful for converting modulos to bitmasks
 
 static struct {
 	bool sending;
@@ -20,8 +21,8 @@ static struct {
 	struct
 	{
 		uint8_t data[PS2_BUFFER_SIZE];
-		uint8_t read;
-		uint8_t write;
+		uint8_t oldest;
+		uint8_t num;
 	} buffer;
 } state[2];
 
@@ -30,13 +31,7 @@ ps2_port_t ps2_port[2];
 bool
 ps2_buffer_can_fit(int i, int n)
 {
-	// Math is hard. There's certainly a way to do this without a loop.
-	for (int n2 = 1; n2 < n; n2++) {
-		if ((state[i].buffer.write + n2) % PS2_BUFFER_SIZE == state[i].buffer.read) {
-			return false;
-		}
-	}
-	return true;
+	return (state[i].buffer.num + n) <= PS2_BUFFER_SIZE;
 }
 
 void
@@ -46,18 +41,21 @@ ps2_buffer_add(int i, uint8_t byte)
 		return;
 	}
 
-	state[i].buffer.data[state[i].buffer.write] = byte;
-	state[i].buffer.write = (state[i].buffer.write + 1) % PS2_BUFFER_SIZE;
+	uint8_t d = (state[i].buffer.oldest + state[i].buffer.num) & PS2_BUFFER_MASK;
+
+	state[i].buffer.data[d] = byte;
+	state[i].buffer.num += 1;
 }
 
 int
 ps2_buffer_remove(int i)
 {
-	if (state[i].buffer.read == state[i].buffer.write) {
+	if (!state[i].buffer.num) {
 		return -1; // empty
 	} else {
-		uint8_t byte = state[i].buffer.data[state[i].buffer.read];
-		state[i].buffer.read = (state[i].buffer.read + 1) % PS2_BUFFER_SIZE;
+		uint8_t byte = state[i].buffer.data[state[i].buffer.oldest];
+		state[i].buffer.oldest = (state[i].buffer.oldest + 1) & PS2_BUFFER_MASK;
+		state[i].buffer.num -= 1;
 		return byte;
 	}
 }
