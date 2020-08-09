@@ -30,6 +30,8 @@
 #define ADDR_SPRDATA_START  0x1FC00
 #define ADDR_SPRDATA_END    0x20000
 
+#define VIDEO_RAM_SIZE		0x20000
+
 #define NUM_SPRITES 128
 
 // both VGA and NTSC
@@ -72,7 +74,10 @@ static SDL_Texture *sdlTexture;
 static bool is_fullscreen = false;
 static float         step_advance;
 
-static uint8_t video_ram[0x20000];
+static uint8_t video_ram[VIDEO_RAM_SIZE];
+static uint8_t video_ram_4bpp[VIDEO_RAM_SIZE * 2];
+static uint8_t video_ram_2bpp[VIDEO_RAM_SIZE * 4];
+static uint8_t video_ram_1bpp[VIDEO_RAM_SIZE * 8];
 static uint8_t palette[256 * 2];
 static uint8_t sprite_data[128][8];
 
@@ -95,7 +100,8 @@ static uint8_t layer_line[2][SCREEN_WIDTH];
 static uint8_t sprite_line_col[SCREEN_WIDTH];
 static uint8_t sprite_line_z[SCREEN_WIDTH];
 static uint8_t sprite_line_mask[SCREEN_WIDTH];
-static uint8_t sprite_line_collisions;
+static uint8_t sprite_line_collisions[SCREEN_WIDTH];
+static uint8_t sprite_collisions;
 static uint8_t layer_line_enable[2];
 static uint8_t sprite_line_enable;
 
@@ -116,6 +122,7 @@ struct video_layer_properties {
 	uint16_t hscroll;
 	uint16_t vscroll;
 	uint8_t  palette_offset;
+	uint8_t  *working_palette;
 
 	uint8_t  mapw_log2;
 	uint8_t  maph_log2;
@@ -170,8 +177,67 @@ static void video_space_read_range(uint8_t* dest, uint32_t address, uint32_t siz
 
 static void prerender_layer_line_text(const uint8_t layer, const uint16_t y, uint8_t *const layer_line);
 static void prerender_layer_line_tile(const uint8_t layer, const uint16_t y, uint8_t *const prerender_line);
+static void prerender_sprite_line(const uint8_t sprite, const uint16_t y, uint8_t *const prerender_line, uint8_t *const cost);
 
 static void refresh_palette();
+
+static void
+expand_1bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
+{
+	while (dst_size >= 8) {
+		*dst = (*src) >> 7;
+		++dst;
+		*dst = ((*src) >> 6) & 0x1;
+		++dst;
+		*dst = ((*src) >> 5) & 0x1;
+		++dst;
+		*dst = ((*src) >> 4) & 0x1;
+		++dst;
+		*dst = ((*src) >> 3) & 0x1;
+		++dst;
+		*dst = ((*src) >> 2) & 0x1;
+		++dst;
+		*dst = ((*src) >> 1) & 0x1;
+		++dst;
+		*dst = (*src) & 0x1;
+		++dst;
+
+		++src;
+		dst_size -= 8;
+	}
+}
+
+static void
+expand_2bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
+{
+	while (dst_size >= 4) {
+		*dst = (*src) >> 6;
+		++dst;
+		*dst = ((*src) >> 4) & 0x3;
+		++dst;
+		*dst = ((*src) >> 2) & 0x3;
+		++dst;
+		*dst = (*src) & 0x3;
+		++dst;
+
+		++src;
+		dst_size -= 4;
+	}
+}
+
+static void
+expand_4bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
+{
+	while (dst_size >= 2) {
+		*dst = (*src) >> 4;
+		++dst;
+		*dst = (*src) & 0xf;
+		++dst;
+
+		++src;
+		dst_size -= 2;
+	}
+}
 
 void
 video_reset()
@@ -216,8 +282,11 @@ video_reset()
 	for (int i = 0; i < 128 * 1024; i++) {
 		video_ram[i] = rand();
 	}
+	expand_4bpp_data(video_ram_4bpp, video_ram, VIDEO_RAM_SIZE * 2);
+	expand_2bpp_data(video_ram_2bpp, video_ram, VIDEO_RAM_SIZE * 4);
+	expand_1bpp_data(video_ram_1bpp, video_ram, VIDEO_RAM_SIZE * 8);
 
-	sprite_line_collisions = 0;
+	sprite_collisions = 0;
 
 	scan_pos_x = 0;
 	scan_pos_y = 0;
@@ -291,64 +360,6 @@ video_end()
 	SDL_DestroyWindow(window);
 }
 
-static void
-expand_1bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
-{
-	while (dst_size >= 8) {
-		*dst = (*src) >> 7;
-		++dst;
-		*dst = ((*src) >> 6) & 0x1;
-		++dst;
-		*dst = ((*src) >> 5) & 0x1;
-		++dst;
-		*dst = ((*src) >> 4) & 0x1;
-		++dst;
-		*dst = ((*src) >> 3) & 0x1;
-		++dst;
-		*dst = ((*src) >> 2) & 0x1;
-		++dst;
-		*dst = ((*src) >> 1) & 0x1;
-		++dst;
-		*dst = (*src) & 0x1;
-		++dst;
-
-		++src;
-		dst_size -= 8;
-	}
-}
-
-static void
-expand_2bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
-{
-	while (dst_size >= 4) {
-		*dst = (*src) >> 6;
-		++dst;
-		*dst = ((*src) >> 4) & 0x3;
-		++dst;
-		*dst = ((*src) >> 2) & 0x3;
-		++dst;
-		*dst = (*src) & 0x3;
-		++dst;
-
-		++src;
-		dst_size -= 4;
-	}
-}
-
-static void
-expand_4bpp_data(uint8_t *dst, const uint8_t *src, int dst_size)
-{
-	while (dst_size >= 2) {
-		*dst = (*src) >> 4;
-		++dst;
-		*dst = (*src) & 0xf;
-		++dst;
-
-		++src;
-		dst_size -= 2;
-	}
-}
-
 static int
 calc_layer_eff_y(const struct video_layer_properties *props, const int y)
 {
@@ -361,6 +372,43 @@ calc_layer_map_addr_base2(const struct video_layer_properties *props, const int 
 	// Slightly faster on some platforms because we know that tilew and tileh are powers of 2.
 	return props->map_base + ((((eff_y >> props->tileh_log2) << props->mapw_log2) + (eff_x >> props->tilew_log2)) << 1);
 }
+
+static uint8_t palette_8bpp[256] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+    32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+    48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+    64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+    80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
+    96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+    128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+    144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+    160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+    176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+    192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+    208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+    224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+    240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255};
+
+static uint8_t palette_4bpp[256] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+    0, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+    0, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+    0, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+    0, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
+    0, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+    0, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+    0, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+    0, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+    0, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+    0, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+    0, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+    0, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+    0, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+    0, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255};
+
 
 // ===========================================
 //
@@ -492,6 +540,7 @@ refresh_layer_properties(const uint8_t layer)
 			props->signature = signature;
 
 			props->color_depth    = reg_layer[layer][0] & 0x3;
+			props->working_palette = (props->color_depth == 3) ? palette_8bpp : palette_4bpp;
 			props->map_base       = reg_layer[layer][1] << 9;
 			props->tile_base      = (reg_layer[layer][2] & 0xFC) << 9;
 			props->bitmap_mode    = (reg_layer[layer][0] & 0x4) != 0;
@@ -549,28 +598,23 @@ refresh_layer_properties(const uint8_t layer)
 		}
 	}
 
+	switch (props->color_depth) {
+		case 0:
+			props->tile_backbuffer = video_ram_1bpp + (props->tile_base << 3);
+			break;
+		case 1:
+			props->tile_backbuffer = video_ram_2bpp + (props->tile_base << 2);
+			break;
+		case 2:
+			props->tile_backbuffer = video_ram_4bpp + (props->tile_base << 1);
+			break;
+		case 3:
+			props->tile_backbuffer = video_ram + props->tile_base;
+			break;
+	}
+
 	if (props->bitmap_mode) {
 		props->bitmap_palette_offset = (reg_layer[layer][4] & 0xf) << 4;
-
-		if (props->tile_backbuffer == NULL) {
-			int tile_buffer_size = props->tilew * props->tileh;
-
-			props->tile_backbuffer = malloc(tile_buffer_size);
-			switch (props->color_depth) {
-				case 0:
-					expand_1bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 1:
-					expand_2bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 2:
-					expand_4bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 3:
-					memcpy(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-			}
-		}
 
 		if (props->layer_backbuffer == NULL) {
 			const int     buffer_size    = props->tilew * props->tileh;
@@ -583,27 +627,6 @@ refresh_layer_properties(const uint8_t layer)
 			}
 		}
 	} else {
-		if (props->tile_backbuffer == NULL) {
-			const int num_tiles_log2   = props->text_mode ? 8 : 12;
-			int       tile_buffer_size = 1 << (props->tilew_log2 + props->tileh_log2 + num_tiles_log2);
-
-			props->tile_backbuffer = malloc(tile_buffer_size);
-			switch (props->color_depth) {
-				case 0:
-					expand_1bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 1:
-					expand_2bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 2:
-					expand_4bpp_data(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-				case 3:
-					memcpy(props->tile_backbuffer, video_ram + props->tile_base, tile_buffer_size);
-					break;
-			}
-		}
-
 		if (props->layer_backbuffer == NULL) {
 			props->layer_backbuffer = malloc(1 << (props->tilew_log2 + props->tileh_log2 + props->mapw_log2 + props->maph_log2));
 
@@ -635,23 +658,6 @@ refresh_active_layer_scroll(int layer)
 	} else {
 		props->hscroll = 0;
 		props->vscroll = 0;
-	}
-}
-
-static void
-clear_layer_tile_backbuffer(int layer)
-{
-	struct video_layer_properties *props = &layer_properties_pool[layer];
-
-	if (props->tile_backbuffer != NULL) {
-		free(props->tile_backbuffer);
-		props->tile_backbuffer = NULL;
-	}
-
-	if (props == layer_properties[0]) {
-		layer_properties_dirty[0] = true;
-	} else if (props == layer_properties[1]) {
-		layer_properties_dirty[1] = true;
 	}
 }
 
@@ -812,29 +818,10 @@ poke_layer_tile(int l, uint32_t addr, uint8_t value)
 	struct video_layer_properties *props = &layer_properties_pool[l];
 
 	if (props->bitmap_mode) {
-		if (props->tile_backbuffer == NULL) {
-			return;
-		}
-
 		const uint32_t poked_tile_addr  = (addr - props->tile_base) << (3 - props->color_depth);
 		uint8_t *      poked_tile_data  = props->tile_backbuffer + poked_tile_addr;
 		const uint32_t poked_layer_addr = (addr - props->tile_base) << (3 - props->color_depth);
 		uint8_t *      poked_layer_data = props->layer_backbuffer + poked_layer_addr;
-
-		switch (props->color_depth) {
-			case 0:
-				expand_1bpp_data(poked_tile_data, &value, 8);
-				break;
-			case 1:
-				expand_2bpp_data(poked_tile_data, &value, 4);
-				break;
-			case 2:
-				expand_4bpp_data(poked_tile_data, &value, 2);
-				break;
-			case 3:
-				*poked_tile_data  = value;
-				break;
-		}
 
 		if (props->layer_backbuffer == NULL) {
 			return;
@@ -866,6 +853,8 @@ poke_layer_tile(int l, uint32_t addr, uint8_t value)
 // ===========================================
 
 struct video_sprite_properties {
+	uint32_t signature;
+
 	int8_t sprite_zdepth;
 	uint8_t sprite_collision_mask;
 
@@ -883,6 +872,11 @@ struct video_sprite_properties {
 	uint32_t sprite_address;
 
 	uint16_t palette_offset;
+	uint8_t *working_palette;
+
+	uint8_t *tile_backbuffer;
+	uint8_t *sprite_line_cost;
+	uint8_t *sprite_backbuffer;
 };
 
 struct video_sprite_properties sprite_properties[128];
@@ -891,6 +885,15 @@ static void
 refresh_sprite_properties(const uint16_t sprite)
 {
 	struct video_sprite_properties* props = &sprite_properties[sprite];
+
+	uint32_t signature = (sprite_data[sprite][0] << 24) | (sprite_data[sprite][1] << 16) | (sprite_data[sprite][6] << 8) | (sprite_data[sprite][7] << 8);
+
+	if (signature != props->signature) {
+		if (props->sprite_backbuffer != NULL) {
+			free(props->sprite_backbuffer);
+			props->sprite_backbuffer = NULL;
+		}
+	}
 
 	props->sprite_zdepth = (sprite_data[sprite][6] >> 2) & 3;
 	props->sprite_collision_mask = sprite_data[sprite][6] & 0xf0;
@@ -917,6 +920,27 @@ refresh_sprite_properties(const uint16_t sprite)
 	props->sprite_address = sprite_data[sprite][0] << 5 | (sprite_data[sprite][1] & 0xf) << 13;
 
 	props->palette_offset = (sprite_data[sprite][7] & 0x0f) << 4;
+	props->working_palette = (props->color_mode ? palette_8bpp : palette_4bpp);
+
+	const int sprite_size = 1 << (props->sprite_width_log2 + props->sprite_height_log2);
+
+	switch (props->color_mode) {
+		case 0:
+			props->tile_backbuffer = video_ram_4bpp + (props->sprite_address << 1);
+			break;
+		case 1:
+			props->tile_backbuffer = video_ram + props->sprite_address;
+			break;
+	}
+
+	if (props->sprite_backbuffer == NULL) {
+		props->sprite_backbuffer = malloc(sprite_size);
+		props->sprite_line_cost  = malloc(props->sprite_height);
+
+		for (uint16_t i = 0; i < props->sprite_height; ++i) {
+			prerender_sprite_line(sprite, i, props->sprite_backbuffer + (i << props->sprite_width_log2), props->sprite_line_cost + i);
+		}
+	}
 }
 
 static bool
@@ -938,8 +962,13 @@ is_sprite_addr(int s, uint32_t addr)
 }
 
 static void
-poke_sprite(int l, uint32_t addr, uint8_t value)
+poke_sprite(int sprite, uint32_t addr, uint8_t value)
 {
+	struct video_sprite_properties *props = &sprite_properties[sprite];
+
+	uint16_t y = (addr - props->sprite_address) >> (props->sprite_width_log2);
+
+	prerender_sprite_line(sprite, y, props->sprite_backbuffer + (y << props->sprite_width_log2), props->sprite_line_cost + y);
 }
 
 // ===========================================
@@ -1009,9 +1038,7 @@ prerender_layer_line_text(const uint8_t layer, const uint16_t y, uint8_t *const 
 	video_space_read_range(tile_bytes, map_addr_begin, size);
 
 	uint32_t tile_start;
-
-	uint8_t fg_color;
-	uint8_t bg_color;
+	uint8_t  palette[2]; // 0 is bg, 1 is fg
 	{
 		// extract all information from the map
 		const uint32_t map_addr = calc_layer_map_addr_base2(props, 0, y) - map_addr_begin;
@@ -1020,11 +1047,11 @@ prerender_layer_line_text(const uint8_t layer, const uint16_t y, uint8_t *const 
 		const uint8_t byte1      = tile_bytes[map_addr + 1];
 
 		if (!props->text_mode_256c) {
-			fg_color = byte1 & 15;
-			bg_color = byte1 >> 4;
+			palette[1] = byte1 & 15;
+			palette[0] = byte1 >> 4;
 		} else {
-			fg_color = byte1;
-			bg_color = 0;
+			palette[1] = byte1;
+			palette[0] = 0;
 		}
 
 		// offset within tilemap of the current tile
@@ -1044,11 +1071,11 @@ prerender_layer_line_text(const uint8_t layer, const uint16_t y, uint8_t *const 
 			const uint8_t byte1      = tile_bytes[map_addr + 1];
 
 			if (!props->text_mode_256c) {
-				fg_color = byte1 & 15;
-				bg_color = byte1 >> 4;
+				palette[1] = byte1 & 15;
+				palette[0] = byte1 >> 4;
 			} else {
-				fg_color = byte1;
-				bg_color = 0;
+				palette[1] = byte1;
+				palette[0] = 0;
 			}
 
 			// offset within tilemap of the current tile
@@ -1057,7 +1084,7 @@ prerender_layer_line_text(const uint8_t layer, const uint16_t y, uint8_t *const 
 
 		// convert tile byte to indexed color
 		const uint8_t col_index = props->tile_backbuffer[tile_start + xx + y_add];
-		prerender_line[x]       = col_index ? fg_color : bg_color;
+		prerender_line[x]       = palette[col_index];
 	}
 }
 
@@ -1128,11 +1155,36 @@ prerender_layer_line_tile(const uint8_t layer, const uint16_t y, uint8_t *const 
 		// convert tile byte to indexed color
 		uint8_t col_index = props->tile_backbuffer[tile_start + (vflip ? y_add_flip : y_add) + (hflip ? (props->tilew_max - xx) : xx)];
 
-		// Apply Palette Offset
-		if (palette_offset && col_index > 0 && col_index < 16) {
-			col_index += palette_offset;
-		}
-		prerender_line[x] = col_index;
+		prerender_line[x] = props->working_palette[col_index];
+	}
+}
+
+static void
+prerender_sprite_line(const uint8_t sprite, const uint16_t y, uint8_t *const prerender_line, uint8_t *const cost)
+{
+	const struct video_sprite_properties *props = &sprite_properties[sprite];
+
+	// one clock per lookup
+	*cost = 1;
+
+	const uint16_t eff_sy = props->vflip ? ((props->sprite_height - 1) - y) : y;
+
+	int16_t       eff_sx      = (props->hflip ? (props->sprite_width - 1) : 0);
+	const int16_t eff_sx_incr = props->hflip ? -1 : 1;
+	const uint16_t penalty_mask = 7 >> props->color_mode;
+
+	const uint8_t *const bitmap_data = props->tile_backbuffer + (eff_sy << props->sprite_width_log2);
+
+	for (uint16_t sx = 0; sx < props->sprite_width; ++sx) {
+		const uint16_t line_x = sx;
+
+		// one clock per rendered pixel, plus one for each fetched 32 bits
+		*cost += (sx & penalty_mask) ? 1 : 2;
+
+		const uint8_t col_index = bitmap_data[eff_sx];
+		eff_sx += eff_sx_incr;
+
+		prerender_line[line_x] = props->working_palette[col_index];
 	}
 }
 
@@ -1204,7 +1256,7 @@ render_sprite_line(const uint16_t y, const uint16_t hsize)
 
 			// palette offset
 			if (col_index > 0) {
-				sprite_line_collisions |= sprite_line_mask[line_x] & props->sprite_collision_mask;
+				sprite_collisions |= sprite_line_mask[line_x] & props->sprite_collision_mask;
 				sprite_line_mask[line_x] |= props->sprite_collision_mask;
 
 		        if (props->sprite_zdepth > sprite_line_z[line_x]) {
@@ -1262,6 +1314,94 @@ render_layer_line_fast(const uint8_t layer, const uint16_t y, const uint16_t hsi
 	}
 }
 
+static void
+render_sprite_line_fast(const uint16_t y, const uint16_t hsize)
+{
+	const uint32_t hscale     = reg_composer[1];
+	const uint32_t xaccum_max = (uint32_t)(hsize - 1) * hscale;
+	const uint16_t x_max      = xaccum_max >> 7;
+
+	memset(sprite_line_col, 0, SCREEN_WIDTH);
+	memset(sprite_line_z, 0, SCREEN_WIDTH);
+	memset(sprite_line_mask, 0, SCREEN_WIDTH);
+	memset(sprite_line_collisions, 0, SCREEN_WIDTH);
+
+	int16_t sprite_budget = 800 + 1;
+	for (int i = 0; i < NUM_SPRITES; i++) {
+		const struct video_sprite_properties *props = &sprite_properties[i];
+		if (props->sprite_zdepth == 0) {
+			continue;
+		}
+
+		// check whether this line falls within the sprite
+		if (y < props->sprite_y || y >= props->sprite_y + props->sprite_height) {
+			continue;
+		}
+
+		const uint16_t eff_sy = (y - props->sprite_y);
+		const uint8_t *bitmap_data = props->sprite_backbuffer + (eff_sy << props->sprite_width_log2);
+
+		if (props->sprite_line_cost[eff_sy] > sprite_budget) {
+			for (uint16_t x = 0; x < props->sprite_width; ++x) {
+				const uint16_t line_x = x + props->sprite_x;
+				if (line_x > x_max) {
+					continue;
+				}
+
+				const uint8_t color = bitmap_data[x];
+				if (color > 0) {
+					sprite_line_collisions[line_x] |= sprite_line_mask[line_x] & props->sprite_collision_mask;
+					sprite_line_mask[line_x] |= props->sprite_collision_mask;
+
+					if (props->sprite_zdepth > sprite_line_z[line_x]) {
+						sprite_line_col[line_x] = color + props->palette_offset;
+						sprite_line_z[line_x]   = props->sprite_zdepth;
+					}
+				}
+			}
+			sprite_budget -= props->sprite_line_cost[eff_sy];
+		} else {
+			// one clock per lookup
+			sprite_budget--;
+
+			for (uint16_t x = 0; x < props->sprite_width; ++x) {
+				const uint16_t line_x = x + props->sprite_x;
+				if (line_x > x_max) {
+					continue;
+				}
+
+				// one clock per rendered pixel, plus one for each fetched 32 bits
+				const uint16_t penalty_mask = 7 >> props->color_mode;
+				sprite_budget -= (x & penalty_mask) ? 1 : 2;
+
+				if (sprite_budget <= 0)
+					break;
+
+				const uint8_t color = bitmap_data[x];
+				if (color > 0) {
+					sprite_line_collisions[line_x] |= sprite_line_mask[line_x] & props->sprite_collision_mask;
+					sprite_line_mask[line_x] |= props->sprite_collision_mask;
+
+					if (props->sprite_zdepth > sprite_line_z[line_x]) {
+						sprite_line_col[line_x] = color + props->palette_offset;
+						sprite_line_z[line_x]   = props->sprite_zdepth;
+					}
+				}
+			}
+		}
+	}
+
+	uint32_t xaccum = xaccum_max;
+	for (int x = hsize - 1; x >= 0; --x) {
+		uint16_t eff_x     = xaccum >> 7;
+		sprite_line_col[x] = sprite_line_col[eff_x];
+		sprite_line_z[x]   = sprite_line_z[eff_x];
+		sprite_collisions |= sprite_line_collisions[eff_x];
+		xaccum -= hscale;
+	}
+}
+
+
 
 static uint8_t calculate_line_col_index(uint8_t spr_zindex, uint8_t spr_col_index, uint8_t l1_col_index, uint8_t l2_col_index)
 {
@@ -1299,7 +1439,7 @@ render_line(uint16_t y)
 	int eff_y = (reg_composer[2] * (y - vstart)) >> 7;
 
 	if (sprite_line_enable) {
-		render_sprite_line(eff_y, hsize);
+		render_sprite_line_fast(eff_y, hsize);
 	}
 
 	if (warp_mode && (frame_count & 63)) {
@@ -1440,12 +1580,12 @@ video_step()
 		scan_pos_y++;
 		if (scan_pos_y == SCREEN_HEIGHT) {
 			if (ien & 4) {
-				if (sprite_line_collisions != 0) {
+				if (sprite_collisions != 0) {
 					isr |= 4;
 				}
-				isr = (isr & 0xf) | sprite_line_collisions;
+				isr = (isr & 0xf) | sprite_collisions;
 			}
-			sprite_line_collisions = 0;
+			sprite_collisions = 0;
 		}
 		if (scan_pos_y == SCAN_HEIGHT) {
 			scan_pos_y = 0;
@@ -1647,7 +1787,11 @@ video_space_read_range(uint8_t* dest, uint32_t address, uint32_t size)
 void
 video_space_write(uint32_t address, uint8_t value)
 {
-	video_ram[address & 0x1FFFF] = value;
+	const uint32_t wrap_address = address & 0x1FFFF;
+	video_ram[wrap_address]     = value;
+	expand_4bpp_data(video_ram_4bpp + (wrap_address << 1), video_ram + wrap_address, 2);
+	expand_2bpp_data(video_ram_2bpp + (wrap_address << 2), video_ram + wrap_address, 4);
+	expand_1bpp_data(video_ram_1bpp + (wrap_address << 3), video_ram + wrap_address, 8);
 
 	if (address >= ADDR_PSG_START && address < ADDR_PSG_END) {
 		psg_writereg(address & 0x3f, value);
