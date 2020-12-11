@@ -99,6 +99,11 @@ const SDL_Color col_data= {0, 255, 255, 255};
 const SDL_Color col_highlight= {255, 255, 0, 255};
 const SDL_Color col_cmdLine= {255, 255, 255, 255};
 
+const SDL_Color col_vram_tilemap = {0, 255, 255, 255};
+const SDL_Color col_vram_tiledata = {0, 255, 0, 255};
+const SDL_Color col_vram_special  = {255, 92, 92, 255};
+const SDL_Color col_vram_other  = {128, 128, 128, 255};
+
 int showDebugOnRender = 0;										// Used to trigger rendering in video.c
 int showFullDisplay = 0; 										// If non-zero show the whole thing.
 int currentPC = -1;												// Current PC value.
@@ -469,10 +474,9 @@ void DEBUGRenderDisplay(int width, int height) {
 
 	DEBUGRenderRegisters();							// Draw register name and values.
 	DEBUGRenderCode(20, currentPC);							// Render 6502 disassembly.
-	DEBUGRenderData(21, currentData);
-   DEBUGRenderZeroPageRegisters(21);
 	if (dumpmode == DDUMP_RAM) {
 		DEBUGRenderData(21, currentData);
+		DEBUGRenderZeroPageRegisters(21);
 	} else {
 		DEBUGRenderVRAM(21, currentData);
 	}
@@ -505,38 +509,38 @@ static void DEBUGRenderCmdLine(int x, int width, int height) {
 
 static void DEBUGRenderZeroPageRegisters(int y) {
 #define LAST_R 15
-   int reg = 0;
-   int y_start = y;
-   char lbl[6];
-   while (reg < DBGMAX_ZERO_PAGE_REGISTERS) {
-      if (((y-y_start) % 5) != 0) {           // Break registers into groups of 5, easier to locate
-         if (reg <= LAST_R)
-            sprintf(lbl, "R%d", reg);
-         else
-            sprintf(lbl, "x%d", reg);
+	int reg = 0;
+	int y_start = y;
+	char lbl[6];
+	while (reg < DBGMAX_ZERO_PAGE_REGISTERS) {
+		if (((y-y_start) % 5) != 0) {           // Break registers into groups of 5, easier to locate
+			if (reg <= LAST_R)
+				sprintf(lbl, "R%d", reg);
+			else
+				sprintf(lbl, "x%d", reg);
 
-         DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
+			DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
 
-         int reg_addr = 2 + reg * 2;
-		 int n        = debug_read6502(reg_addr + 1, currentBank) * 256 + debug_read6502(reg_addr, currentBank);
-         
-         DEBUGNumber(DBG_ZP_REG+5, y, n, 4, col_data);
+			int reg_addr = 2 + reg * 2;
+			int n = debug_read6502(reg_addr+1, currentBank)*256+debug_read6502(reg_addr, currentBank);
 
-         if (oldRegChange[reg] != NULL)
-            DEBUGString(dbgRenderer, DBG_ZP_REG+9, y, oldRegChange[reg], col_data);
+			DEBUGNumber(DBG_ZP_REG+5, y, n, 4, col_data);
 
-         if (oldRegisterTicks != clockticks6502) {   // change detection only when the emulated CPU changes
-            oldRegChange[reg] = n != oldRegisters[reg] ? "*" : " ";
-            oldRegisters[reg]=n;
-         }
-         reg++;
-      }
-      y++;
-   }
+			if (oldRegChange[reg] != NULL)
+				DEBUGString(dbgRenderer, DBG_ZP_REG+9, y, oldRegChange[reg], col_data);
 
-   if (oldRegisterTicks != clockticks6502) {
-      oldRegisterTicks = clockticks6502;
-   }
+			if (oldRegisterTicks != clockticks6502) {   // change detection only when the emulated CPU changes
+				oldRegChange[reg] = n != oldRegisters[reg] ? "*" : " ";
+				oldRegisters[reg]=n;
+			}
+			reg++;
+		}
+		y++;
+	}
+
+	if (oldRegisterTicks != clockticks6502) {
+		oldRegisterTicks = clockticks6502;
+	}
 }
 
 // *******************************************************************************************
@@ -566,9 +570,18 @@ DEBUGRenderVRAM(int y, int data)
 		DEBUGVAddress(DBG_MEMX, y, data & 0x1FFFF, col_label); // Show label.
 
 		for (int i = 0; i < 16; i++) {
-			int byte = video_space_read((data + i) & 0x1FFFF);
-			DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_data);
-//			DEBUGWrite(dbgRenderer, DBG_MEMX + 33 + i, y, byte, col_data);
+			int addr = (data + i) & 0x1FFFF;
+			int byte = video_space_read(addr);
+
+			if (video_is_tilemap_address(addr)) {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_tilemap);
+			} else if (video_is_tiledata_address(addr)) {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_tiledata);
+			} else if (video_is_special_address(addr)) {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_special);
+			} else {
+				DEBUGNumber(DBG_MEMX + 6 + i * 3, y, byte, 2, col_vram_other);
+			}
 		}
 		y++;
 		data += 16;

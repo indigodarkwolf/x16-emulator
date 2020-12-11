@@ -34,6 +34,7 @@
 #include "rom_symbols.h"
 #include "ym2151.h"
 #include "audio.h"
+#include "version.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -214,7 +215,6 @@ machine_dump()
 void
 machine_reset()
 {
-	spi_init();
 	vera_spi_init();
 	via1_init();
 	via2_init();
@@ -380,7 +380,8 @@ is_kernal()
 static void
 usage()
 {
-	printf("\nCommander X16 Emulator  (C)2019 Michael Steil\n");
+	printf("\nCommander X16 Emulator r%s (%s)\n", VER, VER_NAME);
+	printf("(C)2019,2020 Michael Steil et al.\n");
 	printf("All rights reserved. License: 2-clause BSD\n\n");
 	printf("Usage: x16emu [option] ...\n\n");
 	printf("-rom <rom.bin>\n");
@@ -447,6 +448,8 @@ usage()
 	printf("\tPrint instruction trace. Optionally, a trigger address\n");
 	printf("\tcan be specified.\n");
 #endif
+	printf("-version\n");
+	printf("\tPrint additional version information the emulator and ROM.\n");
 	printf("\n");
 	exit(1);
 }
@@ -773,6 +776,11 @@ main(int argc, char **argv)
 			audio_buffers = (int)strtol(argv[0], NULL, 10);
 			argc--;
 			argv++;
+		} else if (!strcmp(argv[0], "-version")){
+			printf("%s", VER_INFO);
+			argc--;
+			argv++;
+			exit(0);
 		} else {
 			usage();
 		}
@@ -793,6 +801,7 @@ main(int argc, char **argv)
 			printf("Cannot open %s!\n", sdcard_path);
 			exit(1);
 		}
+		sdcard_attach();
 	}
 
 	prg_override_start = -1;
@@ -998,7 +1007,6 @@ emulator_loop(void *param)
 		for (uint8_t i = 0; i < clocks; i++) {
 			ps2_step(0);
 			ps2_step(1);
-			spi_step();
 			joystick_step();
 			vera_spi_step();
 			new_frame |= video_step(MHZ);
@@ -1104,6 +1112,9 @@ emulator_loop(void *param)
 			}
 		}
 
+#if 0 // enable this for slow pasting
+		if (!(instruction_counter % 100000))
+#endif
 		while (pasting_bas && RAM[NDX] < 10) {
 			uint32_t c;
 			int e = 0;
