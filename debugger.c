@@ -239,7 +239,7 @@ static void DEBUGHandleKeyEvent(SDL_Keycode key,int isShift) {
 			break;
 
 		case DBGKEY_STEPOVER:								// Step over (F10 by default)
-			opcode = real_read6502(pc, false, 0);							// What opcode is it ?
+			opcode = debug_read6502(pc, 0);							// What opcode is it ?
 			if (opcode == 0x20) { 							// Is it JSR ?
 				stepBreakPoint = pc + 3;					// Then break 3 on.
 				currentMode = DMODE_RUN;					// And run.
@@ -518,7 +518,7 @@ static void DEBUGRenderZeroPageRegisters(int y) {
          DEBUGString(dbgRenderer, DBG_ZP_REG, y, lbl, col_label);
 
          int reg_addr = 2 + reg * 2;
-         int n = real_read6502(reg_addr+1, true, currentBank)*256+real_read6502(reg_addr, true, currentBank);
+		 int n        = debug_read6502(reg_addr + 1, currentBank) * 256 + debug_read6502(reg_addr, currentBank);
          
          DEBUGNumber(DBG_ZP_REG+5, y, n, 4, col_data);
 
@@ -550,7 +550,7 @@ static void DEBUGRenderData(int y,int data) {
 		DEBUGAddress(DBG_MEMX, y, (uint8_t)currentBank, data & 0xFFFF, col_label);	// Show label.
 
 		for (int i = 0;i < 8;i++) {
-			int byte= real_read6502((data+i) & 0xFFFF, true, currentBank);
+			int byte = debug_read6502((data + i) & 0xFFFF, currentBank);
 			DEBUGNumber(DBG_MEMX+8+i*3,y,byte,2, col_data);
 			DEBUGWrite(dbgRenderer, DBG_MEMX+33+i,y,byte, col_data);
 		}
@@ -587,7 +587,7 @@ static void DEBUGRenderCode(int lines, int initialPC) {
 
 		DEBUGAddress(DBG_ASMX, y, currentPCBank, initialPC, col_label);
 
-		int size = disasm(initialPC, RAM, buffer, sizeof(buffer), true, currentPCBank);	// Disassemble code
+		int size = disasm(initialPC, RAM, buffer, sizeof(buffer), currentPCBank);	// Disassemble code
 		// Output assembly highlighting PC
 		DEBUGString(dbgRenderer, DBG_ASMX+8, y, buffer, initialPC == pc ? col_highlight : col_data);
 		initialPC += size;										// Forward to next
@@ -632,10 +632,10 @@ static int DEBUGRenderRegisters(void) {
 	DEBUGNumber(DBG_DATX, yc++, breakPoint & 0xFFFF, 4, col_data);
 	yc++;
 
-	DEBUGNumber(DBG_DATX, yc++, video_read(0, true) | (video_read(1, true)<<8) | (video_read(2, true)<<16), 2, col_data);
-	DEBUGNumber(DBG_DATX, yc++, video_read(3, true), 2, col_data);
-	DEBUGNumber(DBG_DATX, yc++, video_read(4, true), 2, col_data);
-	DEBUGNumber(DBG_DATX, yc++, video_read(5, true), 2, col_data);
+	DEBUGNumber(DBG_DATX, yc++, debug_video_read(0) | (debug_video_read(1) << 8) | (debug_video_read(2) << 16), 2, col_data);
+	DEBUGNumber(DBG_DATX, yc++, debug_video_read(3), 2, col_data);
+	DEBUGNumber(DBG_DATX, yc++, debug_video_read(4), 2, col_data);
+	DEBUGNumber(DBG_DATX, yc++, debug_video_read(5), 2, col_data);
 
 	return n; 													// Number of code display lines
 }
@@ -651,7 +651,7 @@ static void DEBUGRenderStack(int bytesCount) {
 	int y= 0;
 	while (y < bytesCount) {
 		DEBUGNumber(DBG_STCK,y,data & 0xFFFF,4, col_label);
-		int byte = real_read6502((data++) & 0xFFFF, false, 0);
+		int byte = debug_read6502((data++) & 0xFFFF, 0);
 		DEBUGNumber(DBG_STCK+5,y,byte,2, col_data);
 		DEBUGWrite(dbgRenderer, DBG_STCK+9,y,byte, col_data);
 		y++;

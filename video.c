@@ -1234,22 +1234,33 @@ video_space_write(uint32_t address, uint8_t value)
 	}
 }
 
+uint8_t
+debug_video_read(uint8_t reg)
+{
+	switch(reg) {
+		case 0x03:
+		case 0x04:
+			return io_rddata[reg - 3];
+		default:
+			break;
+	}
+
+	return video_read(reg);
+}
+
 //
 // Vera: 6502 I/O Interface
 //
 // if debugOn, read without any side effects (registers & memory unchanged)
 
-uint8_t video_read(uint8_t reg, bool debugOn) {
+uint8_t video_read(uint8_t reg)
+{
 	switch (reg & 0x1F) {
 		case 0x00: return io_addr[io_addrsel] & 0xff;
 		case 0x01: return (io_addr[io_addrsel] >> 8) & 0xff;
 		case 0x02: return (io_addr[io_addrsel] >> 16) | (io_inc[io_addrsel] << 3);
 		case 0x03:
 		case 0x04: {
-			if (debugOn) {
-				return io_rddata[reg - 3];
-			}
-
 			uint32_t address = get_and_inc_address(reg - 3);
 
 			uint8_t value = io_rddata[reg - 3];
