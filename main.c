@@ -948,7 +948,7 @@ emulator_loop(void *param)
 			}
 			printf(" %02x:.,%04x ", memory_get_rom_bank(), pc);
 			char disasm_line[15];
-			int len = disasm(pc, RAM, disasm_line, sizeof(disasm_line), false, 0);
+			int len = disasm(pc, RAM, disasm_line, sizeof(disasm_line), 0);
 			for (int i = 0; i < len; i++) {
 				printf("%02x ", read6502(pc + i));
 			}
