@@ -170,7 +170,11 @@ real_io_read(uint16_t address)
 uint8_t
 read6502(uint16_t address) 
 {
-	return real_read6502(address);
+	uint8_t const value = real_read6502(address);
+	#ifdef TRACE
+	printf("$%04x >> $%02x\n", address, value);
+	#endif
+	return value;
 }
 
 uint8_t
@@ -238,6 +242,10 @@ io_write(uint16_t address, uint8_t value)
 void
 write6502(uint16_t address, uint8_t value)
 {
+#ifdef TRACE
+	printf("$%04x << $%02x\n", address, value);
+#endif
+
 	switch (memory_map_hi[address >> 8]) {
 		case MEMMAP_NULL: break;
 		case MEMMAP_DIRECT: RAM[address] = value; break;
