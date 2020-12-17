@@ -13,6 +13,7 @@
 #include "memory.h"
 #include "video.h"
 #include "rom_symbols.h"
+#include "cpu/fake6502.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -122,22 +123,22 @@ LOAD()
 	memcpy(filename, (char *)&RAM[RAM[FNADR] | RAM[FNADR + 1] << 8], len);
 	filename[len] = 0;
 
-	uint16_t override_start = (x | (y << 8));
+	uint16_t override_start = (CPU.x | (CPU.y << 8));
 
 	if (filename[0] == '$') {
 		uint16_t dir_len = create_directory_listing(RAM + override_start);
 		uint16_t end = override_start + dir_len;
-		x = end & 0xff;
-		y = end >> 8;
-		status &= 0xfe;
+		CPU.x = end & 0xff;
+		CPU.y = end >> 8;
+		CPU.status &= 0xfe;
 		RAM[STATUS] = 0;
-		a = 0;
+		CPU.a       = 0;
 	} else {
 		SDL_RWops *f = SDL_RWFromFile(filename, "rb");
 		if (!f) {
-			a = 4; // FNF
-			RAM[STATUS] = a;
-			status |= 1;
+			CPU.a       = 4; // FNF
+			RAM[STATUS] = CPU.a;
+			CPU.status |= 1;
 			return;
 		}
 		uint8_t start_lo = SDL_ReadU8(f);
@@ -151,11 +152,11 @@ LOAD()
 		}
 
 		size_t bytes_read = 0;
-		if(a > 1) {
+		if (CPU.a > 1) {
 			// Video RAM
 			video_write(0, start & 0xff);
 			video_write(1, start >> 8);
-			video_write(2, ((a - 2) & 0xf) | 0x10);
+			video_write(2, ((CPU.a - 2) & 0xf) | 0x10);
 			uint8_t buf[2048];
 			while(1) {
 				size_t n = SDL_RWread(f, buf, 1, sizeof buf);
@@ -188,11 +189,11 @@ LOAD()
 		SDL_RWclose(f);
 
 		uint16_t end = start + bytes_read;
-		x = end & 0xff;
-		y = end >> 8;
-		status &= 0xfe;
+		CPU.x        = end & 0xff;
+		CPU.y        = end >> 8;
+		CPU.status &= 0xfe;
 		RAM[STATUS] = 0;
-		a = 0;
+		CPU.a       = 0;
 	}
 }
 
@@ -204,19 +205,19 @@ SAVE()
 	memcpy(filename, (char *)&RAM[RAM[FNADR] | RAM[FNADR + 1] << 8], len);
 	filename[len] = 0;
 
-	uint16_t start = RAM[a] | RAM[a + 1] << 8;
-	uint16_t end = x | y << 8;
+	uint16_t start = RAM[CPU.a] | RAM[CPU.a + 1] << 8;
+	uint16_t end   = CPU.x | CPU.y << 8;
 	if (end < start) {
-		status |= 1;
-		a = 0;
+		CPU.status |= 1;
+		CPU.a = 0;
 		return;
 	}
 
 	SDL_RWops *f = SDL_RWFromFile(filename, "wb");
 	if (!f) {
-		a = 4; // FNF
-		RAM[STATUS] = a;
-		status |= 1;
+		CPU.a       = 4; // FNF
+		RAM[STATUS] = CPU.a;
+		CPU.status |= 1;
 		return;
 	}
 
@@ -226,8 +227,8 @@ SAVE()
 	SDL_RWwrite(f, RAM + start, 1, end - start);
 	SDL_RWclose(f);
 
-	status &= 0xfe;
+	CPU.status &= 0xfe;
 	RAM[STATUS] = 0;
-	a = 0;
+	CPU.a       = 0;
 }
 

@@ -4,73 +4,59 @@
 
 */
 
-#define saveaccum(n) a = (uint8_t)((n) & 0x00FF)
-
+#ifndef SUPPORT_H
+#define SUPPORT_H
 
 //flag modifier macros
-#define setcarry() status |= FLAG_CARRY
-#define clearcarry() status &= (~FLAG_CARRY)
-#define setzero() status |= FLAG_ZERO
-#define clearzero() status &= (~FLAG_ZERO)
-#define setinterrupt() status |= FLAG_INTERRUPT
-#define clearinterrupt() status &= (~FLAG_INTERRUPT)
-#define setdecimal() status |= FLAG_DECIMAL
-#define cleardecimal() status &= (~FLAG_DECIMAL)
-#define setoverflow() status |= FLAG_OVERFLOW
-#define clearoverflow() status &= (~FLAG_OVERFLOW)
-#define setsign() status |= FLAG_SIGN
-#define clearsign() status &= (~FLAG_SIGN)
+#define setflags(BITS) CPU.status |= (BITS)
+#define clearflags(BITS) CPU.status &= ~(BITS)
+#define setcarry() CPU.status |= (FLAG_CARRY)
+#define clearcarry() CPU.status &= (~FLAG_CARRY)
+#define setzero() CPU.status |= (FLAG_ZERO)
+#define clearzero() CPU.status &= (~FLAG_ZERO)
+#define setinterrupt() CPU.status |= (FLAG_INTERRUPT)
+#define clearinterrupt() CPU.status &= (~FLAG_INTERRUPT)
+#define setdecimal() CPU.status |= (FLAG_DECIMAL)
+#define cleardecimal() CPU.status &= (~FLAG_DECIMAL)
+#define setoverflow() CPU.status |= (FLAG_OVERFLOW)
+#define clearoverflow() CPU.status &= (~FLAG_OVERFLOW)
+#define setsign() CPU.status |= (FLAG_SIGN)
+#define clearsign() CPU.status &= (~FLAG_SIGN)
 
-
-//flag calculation macros
-#define zerocalc(n) {\
-    if ((n) & 0x00FF) clearzero();\
-        else setzero();\
-}
-
-#define signcalc(n) {\
-    if ((n) & 0x0080) setsign();\
-        else clearsign();\
-}
-
-#define carrycalc(n) {\
-    if ((n) & 0xFF00) setcarry();\
-        else clearcarry();\
-}
-
-#define overflowcalc(n, m, o) { /* n = result, m = accumulator, o = memory */ \
-    if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080) setoverflow();\
-        else clearoverflow();\
-}
+#define select_carry(A) (((A) >> 8) & 1)
+#define select_zero(A) (((A) == 0) << 1)
+#define select_overflow(R, A, M) ((((R)^(A) & (R)^(M)) & 0x80) >> 1)
+#define select_sign(A) ((A) & 0x80)
 
 //a few general functions used by various other functions
-void push16(uint16_t pushval) {
-    write6502(BASE_STACK + sp, (pushval >> 8) & 0xFF);
-    write6502(BASE_STACK + ((sp - 1) & 0xFF), pushval & 0xFF);
-    sp -= 2;
+inline static void push16(uint16_t pushval) {
+    write6502(BASE_STACK + CPU.sp, (pushval >> 8) & 0xFF);
+    write6502(BASE_STACK + ((CPU.sp - 1) & 0xFF), pushval & 0xFF);
+    CPU.sp -= 2;
 }
 
-void push8(uint8_t pushval) {
-    write6502(BASE_STACK + sp--, pushval);
+inline static void push8(uint8_t pushval) {
+    write6502(BASE_STACK + CPU.sp--, pushval);
 }
 
-uint16_t pull16() {
-    uint16_t temp16;
-    temp16 = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
-    sp += 2;
+inline static uint16_t pull16(void) {
+    const uint16_t temp16 = read6502(BASE_STACK + ((CPU.sp + 1) & 0xFF)) | ((uint16_t)read6502(BASE_STACK + ((CPU.sp + 2) & 0xFF)) << 8);
+    CPU.sp += 2;
     return(temp16);
 }
 
-uint8_t pull8() {
-    return (read6502(BASE_STACK + ++sp));
+inline static uint8_t pull8(void) {
+    return (read6502(BASE_STACK + ++CPU.sp));
 }
 
-void reset6502() {
-    pc = (uint16_t)read6502(0xFFFC) | ((uint16_t)read6502(0xFFFD) << 8);
-    a = 0;
-    x = 0;
-    y = 0;
-    sp = 0xFD;
-    status |= FLAG_CONSTANT;
+inline static uint8_t read8(void) {
+    return read6502(CPU.pc++);
 }
 
+inline static uint16_t read16(void) {
+    const uint16_t value = (uint16_t)read6502(CPU.pc) | ((uint16_t)read6502(CPU.pc+1) << 8);
+    CPU.pc += 2;
+    return value;
+}
+
+#endif // SUPPORT_H

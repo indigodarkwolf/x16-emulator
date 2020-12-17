@@ -42,8 +42,8 @@ typedef enum {
 	RECORD_GIF_ACTIVE
 } gif_recorder_state_t;
 
-extern uint8_t a, x, y, sp, status;
-extern uint16_t pc;
+extern struct cpu_state CPU;
+
 extern uint8_t *RAM;
 extern uint8_t ROM[];
 

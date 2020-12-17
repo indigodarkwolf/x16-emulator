@@ -9,14 +9,14 @@
 ; *******************************************************************************************
 ; *******************************************************************************************
 
-adc abso 4 $6d
-adc absx 4 $7d
-adc absy 4 $79
-adc imm  2 $69
-adc indx 6 $61
-adc indy 5 $71
-adc zp   3 $65
-adc zpx  4 $75
+adcx abso 4 $6d
+adcx absx 4 $7d
+adcx absy 4 $79
+adcx imm  2 $69
+adcx indx 6 $61
+adcx indy 5 $71
+adcx zp   3 $65
+adcx zpx  4 $75
 
 and abso 4 $2d
 and absx 4 $3d
@@ -27,11 +27,11 @@ and indy 5 $31
 and zp   3 $25
 and zpx  4 $35
 
-asl abso 6 $0e
-asl absx 7 $1e
-asl acc  2 $0a
-asl zp   5 $06
-asl zpx  6 $16
+aslm abso 6 $0e
+aslm absx 7 $1e
+asla acc  2 $0a
+aslm zp   5 $06
+aslm zpx  6 $16
 
 bcc rel  2 $90
 bcs rel  2 $b0
@@ -69,10 +69,10 @@ cpy abso 4 $cc
 cpy imm  2 $c0
 cpy zp   3 $c4
 
-dec abso 6 $ce
-dec absx 7 $de
-dec zp   5 $c6
-dec zpx  6 $d6
+decm abso 6 $ce
+decm absx 7 $de
+decm zp   5 $c6
+decm zpx  6 $d6
 
 dex imp  2 $ca
 dey imp  2 $88
@@ -86,10 +86,10 @@ eor indy 5 $51
 eor zp   3 $45
 eor zpx  4 $55
 
-inc abso 6 $ee
-inc absx 7 $fe
-inc zp   5 $e6
-inc zpx  6 $f6
+incm abso 6 $ee
+incm absx 7 $fe
+incm zp   5 $e6
+incm zpx  6 $f6
 
 inx imp  2 $e8
 iny imp  2 $c8
@@ -119,11 +119,11 @@ ldy imm  2 $a0
 ldy zp   3 $a4
 ldy zpx  4 $b4
 
-lsr abso 6 $4e
-lsr absx 7 $5e
-lsr acc  2 $4a
-lsr zp   5 $46
-lsr zpx  6 $56
+lsrm abso 6 $4e
+lsrm absx 7 $5e
+lsra acc  2 $4a
+lsrm zp   5 $46
+lsrm zpx  6 $56
 
 ora abso 4 $0d
 ora absx 4 $1d
@@ -139,29 +139,29 @@ php imp  3 $08
 pla imp  4 $68
 plp imp  4 $28
 
-rol abso 6 $2e
-rol absx 7 $3e
-rol acc  2 $2a
-rol zp   5 $26
-rol zpx  6 $36
+rolm abso 6 $2e
+rolm absx 7 $3e
+rola acc  2 $2a
+rolm zp   5 $26
+rolm zpx  6 $36
 
-ror abso 6 $6e
-ror absx 7 $7e
-ror acc  2 $6a
-ror zp   5 $66
-ror zpx  6 $76
+rorm abso 6 $6e
+rorm absx 7 $7e
+rora acc  2 $6a
+rorm zp   5 $66
+rorm zpx  6 $76
 
 rti imp  6 $40
 rts imp  6 $60
 
-sbc abso 4 $ed
-sbc absx 4 $fd
-sbc absy 4 $f9
-sbc imm  2 $e9
-sbc indx 6 $e1
-sbc indy 5 $f1
-sbc zp   3 $e5
-sbc zpx  4 $f5
+sbcx abso 4 $ed
+sbcx absx 4 $fd
+sbcx absy 4 $f9
+sbcx imm  2 $e9
+sbcx indx 6 $e1
+sbcx indy 5 $f1
+sbcx zp   3 $e5
+sbcx zpx  4 $f5
 
 sec imp  2 $38
 sed imp  2 $f8

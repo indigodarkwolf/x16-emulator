@@ -160,7 +160,7 @@ label_for_address(uint16_t address)
 	}
 
 	if (!addresses) {
-		return NULL;
+		return "";
 	}
 
 	for (int i = 0; i < count; i++) {
@@ -168,7 +168,7 @@ label_for_address(uint16_t address)
 			return labels[i];
 		}
 	}
-	return NULL;
+	return "";
 }
 #endif
 
@@ -195,12 +195,12 @@ machine_dump()
 	}
 
 	if (dump_cpu) {
-		SDL_RWwrite(f, &a, sizeof(uint8_t), 1);
-		SDL_RWwrite(f, &x, sizeof(uint8_t), 1);
-		SDL_RWwrite(f, &y, sizeof(uint8_t), 1);
-		SDL_RWwrite(f, &sp, sizeof(uint8_t), 1);
-		SDL_RWwrite(f, &status, sizeof(uint8_t), 1);
-		SDL_RWwrite(f, &pc, sizeof(uint16_t), 1);
+		SDL_RWwrite(f, &CPU.a, sizeof(uint8_t), 1);
+		SDL_RWwrite(f, &CPU.x, sizeof(uint8_t), 1);
+		SDL_RWwrite(f, &CPU.y, sizeof(uint8_t), 1);
+		SDL_RWwrite(f, &CPU.sp, sizeof(uint8_t), 1);
+		SDL_RWwrite(f, &CPU.status, sizeof(uint8_t), 1);
+		SDL_RWwrite(f, &CPU.pc, sizeof(uint16_t), 1);
 	}
 	memory_save(f, dump_ram, dump_bank);
 
@@ -931,14 +931,14 @@ emulator_loop(void *param)
 #endif
 
 #ifdef TRACE
-		if (pc == trace_address && trace_address != 0) {
+		if (CPU.pc == trace_address && trace_address != 0) {
 			trace_mode = true;
 		}
 		if (trace_mode) {
 			//printf("\t\t\t\t");
 			printf("[%6d] ", instruction_counter);
 
-			char *label = label_for_address(pc);
+			char *label     = label_for_address(CPU.pc);
 			int label_len = label ? strlen(label) : 0;
 			if (label) {
 				printf("%s", label);
@@ -946,12 +946,15 @@ emulator_loop(void *param)
 			for (int i = 0; i < 20 - label_len; i++) {
 				printf(" ");
 			}
-			printf(" %02x:%04x ", memory_get_rom_bank(), pc);
+			printf(" %02x:%04x ", memory_get_rom_bank(), CPU.pc);
 			char disasm_line[15];
-			int len = disasm(pc, RAM, disasm_line, sizeof(disasm_line), 0);
+			int  len = disasm(CPU.pc, RAM, disasm_line, sizeof(disasm_line), 0);
+
 			extern uint8_t effective_ram_bank();
-			for (int i = 0; i < len; i++) {
-				printf("%02x ", debug_read6502(pc + i, effective_ram_bank()));
+
+			for (int i = 0; i < len; i++)
+			{
+				printf("%02x ", debug_read6502(CPU.pc + i, effective_ram_bank()));
 			}
 			for (int i = 0; i < 9 - 3 * len; i++) {
 				printf(" ");
@@ -961,9 +964,9 @@ emulator_loop(void *param)
 				printf(" ");
 			}
 
-			printf("a=$%02x x=$%02x y=$%02x s=$%02x p=", a, x, y, sp);
+			printf("a=$%02x x=$%02x y=$%02x s=$%02x p=", CPU.a, CPU.x, CPU.y, CPU.sp);
 			for (int i = 7; i >= 0; i--) {
-				printf("%c", (status & (1 << i)) ? "czidb.vn"[i] : '-');
+				printf("%c", (CPU.status & (1 << i)) ? "czidb.vn"[i] : '-');
 			}
 
 #if 0
@@ -990,20 +993,20 @@ emulator_loop(void *param)
 #endif
 
 #ifdef LOAD_HYPERCALLS
-		if ((pc == 0xffd5 || pc == 0xffd8) && is_kernal() && RAM[FA] == 8 && !sdcard_file) {
-			if (pc == 0xffd5) {
+		if ((CPU.pc == 0xffd5 || CPU.pc == 0xffd8) && is_kernal() && RAM[FA] == 8 && !sdcard_file) {
+			if (CPU.pc == 0xffd5) {
 				LOAD();
 			} else {
 				SAVE();
 			}
-			pc = (RAM[0x100 + sp + 1] | (RAM[0x100 + sp + 2] << 8)) + 1;
-			sp += 2;
+			CPU.pc = (RAM[0x100 + CPU.sp + 1] | (RAM[0x100 + CPU.sp + 2] << 8)) + 1;
+			CPU.sp += 2;
 		}
 #endif
 
-		uint32_t old_clockticks6502 = clockticks6502;
-		step6502();
-		uint8_t clocks = clockticks6502 - old_clockticks6502;
+		uint32_t old_clockticks6502 = CPU.perf.clock_ticks;
+		step6502(240); // We can safely run ops in batches of 240, as far as the VERA is concerned: ~253.96825 cycles per line, rounded down for safety, longest running op is 7 cycles, and consequently we might also have started this line as much 6 cycles late.
+		uint8_t clocks = CPU.perf.clock_ticks - old_clockticks6502;
 		bool new_frame = false;
 		for (uint8_t i = 0; i < clocks; i++) {
 			ps2_step(0);
@@ -1029,8 +1032,8 @@ emulator_loop(void *param)
 		}
 
 		if (video_get_irq_out()) {
-			if (!(status & 4)) {
-//				printf("IRQ!\n");
+			if (!(CPU.status & 4)) {
+				//				printf("IRQ!\n");
 				irq6502();
 			}
 		}
@@ -1041,15 +1044,15 @@ emulator_loop(void *param)
 		}
 #endif
 
-		if (pc == 0xffff) {
+		if (CPU.pc == 0xffff) {
 			if (save_on_exit) {
 				machine_dump();
 			}
 			break;
 		}
 
-		if (echo_mode != ECHO_MODE_NONE && pc == 0xffd2 && is_kernal()) {
-			uint8_t c = a;
+		if (echo_mode != ECHO_MODE_NONE && CPU.pc == 0xffd2 && is_kernal()) {
+			uint8_t c = CPU.a;
 			if (echo_mode == ECHO_MODE_COOKED) {
 				if (c == 0x0d) {
 					printf("\n");
@@ -1076,7 +1079,7 @@ emulator_loop(void *param)
 			fflush(stdout);
 		}
 
-		if (pc == 0xffcf && is_kernal()) {
+		if (CPU.pc == 0xffcf && is_kernal()) {
 			// as soon as BASIC starts reading a line...
 			if (prg_file) {
 				// ...inject the app into RAM

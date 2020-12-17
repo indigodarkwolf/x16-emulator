@@ -17,7 +17,7 @@
 //
 // *******************************************************************************************
 
-int disasm(uint16_t pc, uint8_t *RAM, char *line, unsigned int max_line, bool debugOn, uint8_t bank) {
+int disasm(uint16_t pc, uint8_t *RAM, char *line, unsigned int max_line, uint8_t bank) {
 	uint8_t opcode = debug_read6502(pc, bank);
 	char const *mnemonic = mnemonics[opcode];
 

@@ -9,21 +9,21 @@
 ; *******************************************************************************************
 ; *******************************************************************************************
 
-adc ind0 5 $72
+adcx ind0 5 $72
 and ind0 5 $32
 cmp ind0 5 $d2
 eor ind0 5 $52
 lda ind0 5 $b2
 ora ind0 5 $12
-sbc ind0 5 $f2
+sbcx ind0 5 $f2
 sta ind0 5 $92
 
 bit imm 2 $89
 bit zpx 4 $34
 bit absx 4 $3c
 
-dec acc 2 $3a
-inc acc 2 $1a
+deca acc 2 $3a
+inca acc 2 $1a
 
 jmp ainx 6 $7c
 

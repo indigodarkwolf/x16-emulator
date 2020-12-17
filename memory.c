@@ -391,13 +391,13 @@ debug_emu_read(uint8_t reg)
 		return record_gif;
 
 	} else if (reg == 8) {
-		return (clockticks6502 >> 0) & 0xff;
+		return (CPU.perf.clock_ticks >> 0) & 0xff;
 	} else if (reg == 9) {
-		return (clockticks6502 >> 8) & 0xff;
+		return (CPU.perf.clock_ticks >> 8) & 0xff;
 	} else if (reg == 10) {
-		return (clockticks6502 >> 16) & 0xff;
+		return (CPU.perf.clock_ticks >> 16) & 0xff;
 	} else if (reg == 11) {
-		return (clockticks6502 >> 24) & 0xff;
+		return (CPU.perf.clock_ticks >> 24) & 0xff;
 
 	} else if (reg == 13) {
 		return keymap;
@@ -426,13 +426,13 @@ emu_read(uint8_t reg)
 		return record_gif;
 
 	} else if (reg == 8) {
-		return (clockticks6502 >> 0) & 0xff;
+		return (CPU.perf.clock_ticks >> 0) & 0xff;
 	} else if (reg == 9) {
-		return (clockticks6502 >> 8) & 0xff;
+		return (CPU.perf.clock_ticks >> 8) & 0xff;
 	} else if (reg == 10) {
-		return (clockticks6502 >> 16) & 0xff;
+		return (CPU.perf.clock_ticks >> 16) & 0xff;
 	} else if (reg == 11) {
-		return (clockticks6502 >> 24) & 0xff;
+		return (CPU.perf.clock_ticks >> 24) & 0xff;
 
 	} else if (reg == 13) {
 		return keymap;
