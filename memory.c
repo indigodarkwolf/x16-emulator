@@ -93,7 +93,7 @@ memory_init()
 	build_memory_map(memmap_table_io, memory_map_io);
 }
 
-static uint8_t
+uint8_t
 effective_ram_bank()
 {
 	return ram_bank % num_ram_banks;

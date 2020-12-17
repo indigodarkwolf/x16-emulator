@@ -946,11 +946,12 @@ emulator_loop(void *param)
 			for (int i = 0; i < 20 - label_len; i++) {
 				printf(" ");
 			}
-			printf(" %02x:.,%04x ", memory_get_rom_bank(), pc);
+			printf(" %02x:%04x ", memory_get_rom_bank(), pc);
 			char disasm_line[15];
 			int len = disasm(pc, RAM, disasm_line, sizeof(disasm_line), 0);
+			extern uint8_t effective_ram_bank();
 			for (int i = 0; i < len; i++) {
-				printf("%02x ", read6502(pc + i));
+				printf("%02x ", debug_read6502(pc + i, effective_ram_bank()));
 			}
 			for (int i = 0; i < 9 - 3 * len; i++) {
 				printf(" ");
