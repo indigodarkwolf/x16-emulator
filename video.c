@@ -1286,7 +1286,7 @@ uint8_t video_read(uint8_t reg)
 			io_rddata[reg - 3] = video_space_read(io_addr[reg - 3]);
 
 			if (log_video) {
-				printf("READ  video_space[$%X] = $%02X\n", address, value);
+				printf("READ  video_space[$%05X] = $%02X\n", address, value);
 			}
 			return value;
 		}
@@ -1349,7 +1349,7 @@ void video_write(uint8_t reg, uint8_t value) {
 		case 0x04: {
 			uint32_t address = get_and_inc_address(reg - 3);
 			if (log_video) {
-				printf("WRITE video_space[$%X] = $%02X\n", address, value);
+				printf("WRITE video_space[$%05X] = $%02X\n", address, value);
 			}
 			video_space_write(address, value);
 
